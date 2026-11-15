@@ -31,57 +31,48 @@ Capture, re-scan, and export high-fidelity 3D scans with LiDAR depth, RGB, and c
 ## Description (4000 chars max)
 
 ```
-Scan4D is a professional-grade reality capture app for iPhone and iPad. It turns your device's LiDAR sensor and camera into a powerful 3D scanner, capturing detailed meshes, depth maps, and camera poses for downstream reconstruction, photogrammetry, and spatial computing.
+Scan4D is a reality capture app for LiDAR-equipped iPhone and iPad. It turns the depth sensor and camera into a 3D scanner, capturing detailed meshes, depth maps, photos, and camera poses for reconstruction, photogrammetry, and spatial computing.
 
-• AR mode: real-time mesh with procedural wireframe overlay and 3D occlusion-based coverage visualization
-• VR mode: live accumulated depth point cloud with bloom and confidence decay on a dark background
-• 16-bit depth maps with confidence maps captured at adaptive frame rates
+• AR mode: real-time mesh with a wireframe overlay and occlusion-aware coverage visualization
+• VR mode: live accumulated depth point cloud with bloom and confidence decay
+• 16-bit depth maps with confidence maps at adaptive frame rates
 • Scan capacity metrics: polygon count, drift tracking, session duration
-• Scan coaching: real-time tips guide scanning technique with 4-tier priority (tracking warnings, pattern hints, progress encouragement)
-• Automatic hi-res photos: native-resolution stills are taken for you whenever the device is steady and the view has changed, under a short-exposure cap for sharp images — an amber/clear coverage overlay shows where photos are still needed
-• Focus scans: draw a box around one area (a work table, a shelf) on a previous scan and photograph it in detail — from a quick check of a few photos to dense coverage for 3D reconstruction — with a live dial of the angles covered
-• Space staging analyzer: optional pre-scan 360° sweep checks lighting, doors, screens, and people; presents a report with actionable tips before recording
-• Interactive 3D mesh preview with camera-sampled vertex coloring and loading indicator
-• Privacy filtering: person segmentation removes humans from meshes, face blurring in RGB exports; switched off, it turns itself back on after 24 hours
-• VIO tracking guard: automatic halt and save prompt on mid-scan tracking loss
+• Scan coaching: real-time tips on tracking, scanning pattern, and progress
+• Automatic hi-res photos: sharp native-resolution stills taken whenever the device is steady and the view has changed, with a coverage overlay showing where photos are still needed
+• Focus scans: draw a box around one area (a work table, a shelf) on a previous scan and photograph it in detail, from a quick check to dense coverage for 3D reconstruction, with a live dial of the angles covered
+• Space staging analyzer: an optional 360° sweep before scanning checks lighting, doors, screens, and people, with tips
+• Interactive 3D preview with camera-sampled vertex colors
+• Privacy filtering: people removed from meshes and faces blurred in exported images; switched off, it turns itself back on after 24 hours
+• Tracking guard: the scan halts and offers to save if tracking is lost
 
 PROXY MODE (Meta Ray-Ban Smart Glasses)
-• Stream frames from Meta Ray-Ban glasses via Bluetooth
-• Picture-in-picture preview on capture screen
-• Privacy filter applied to wearable frames
-• Configurable FPS slider for stream quality
+• Stream frames from Meta Ray-Ban glasses over Bluetooth, with a picture-in-picture preview, adjustable frame rate, and the privacy filter applied
 
 TIME-SERIES SCANNING
-• Group scans by Location and re-scan the same space over time
-• On-device Process step finishes each scan: room layout, plane-based registration, ghost proxy, and vertex coloring
-• Automatic plane registration aligns every rescan into the location's shared coordinate frame — walls and floors matched, unreliable fits refused rather than guessed
-• Rescan Space and Link Adjacent Space load a configurable ghost overlay of previous captures, with live auto-alignment against detected planes
-• Multi-level spaces: steps, landings, and ramps that room modelling misses are recovered from the scan's own mesh and shown in the 3D preview
-• Adjacent stitching: scan neighboring areas with shared coordinate frames
-• ARWorldMap relocalization with rejection and manual ghost mesh alignment
+• Group scans by location and rescan the same space over time
+• On-device Process step finishes each scan: room layout, registration, ghost proxy, and vertex coloring
+• Automatic plane registration aligns every rescan into the location's shared coordinate frame; unreliable fits are refused, never guessed
+• Rescan Space and Link Adjacent Space show a ghost of previous captures, aligned live against detected planes, with relocalization checks and manual alignment
+• Multi-level spaces: steps, landings, and ramps are recovered from the scan's own mesh
 • Bad-scan warning right after save, so a failed capture can be redone on the spot
-• Linked-scan graph visualization with combined-mesh viewer
+• Linked-scan graph with a combined-mesh viewer
 
 BULK OPERATIONS
-• Multi-select locations for bulk delete
-• Multi-select scans for bulk Process, Share, Sync, and Delete with per-tile progress
-• Sync badge per space: whether your Scan4D server has its map or everything in it
+• Multi-select locations and scans for bulk Process, Share, Sync, and Delete with per-tile progress
 • Background post-scan processing with per-card progress
 
 FLEXIBLE EXPORT FORMATS
-• Scan4D: Everything a scan captured in one bundle: images, depth, confidence, camera poses, the colored mesh, room layout, ARKit feature points, 360° stills and metadata. A Scan4D server turns it into Nerfstudio training data or flame3d object-search input
-• OBJ / PLY / USDZ: Native mesh formats, in the scan's real colors, for MeshLab, Blender, and iOS Quick Look
+• Scan4D: everything a scan captured in one bundle: images, depth, confidence, camera poses, the colored mesh, room layout, ARKit feature points, 360° stills, and metadata. A Scan4D server turns it into Nerfstudio training data or flame3d object-search input
+• OBJ / PLY / USDZ: mesh formats in the scan's real colors for MeshLab, Blender, and iOS Quick Look
 
 SCAN4D SERVER SYNC
-• Sync spaces to your own Scan4D server: each space's map, then every processed scan as one bundle
-• Bundles upload in the background over Wi-Fi, even with the screen locked, from a checklist you control
+• Sync to your own Scan4D server: each space's map, then every processed scan as one bundle
+• Choose which spaces sync, and keep test scans on the device
+• Bundles upload in the background over Wi-Fi, even with the screen locked, with a sync badge on each space
 • Share to Files or AirDrop for offline workflows
-• Compatible with self-hosted reconstruction pipelines
 
 DEVELOPER MODE
-• Synthetic IMU, camera, and depth injection for Simulator testing
-• Performance diagnostics and debug overlays
-• Mock wearables mode for testing glasses integration
+• Simulator testing with synthetic IMU, camera, and depth, mock glasses, and performance diagnostics
 
 Designed for researchers, 3D scanning professionals, and spatial computing developers who need raw, high-fidelity sensor data with full control over the reconstruction pipeline.
 
