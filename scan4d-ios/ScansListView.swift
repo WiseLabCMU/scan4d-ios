@@ -1032,6 +1032,8 @@ struct ScanCard: View {
             Text("The scan data may have been deleted.")
         }
         .task(id: scan.id) {
+            // Its splat on this phone, if one was downloaded (read once, off main).
+            await ScanLayers.shared.readLocal(scanId: scan.id, scanDirectory: scan.scanDirectory)
             // A focus scan's data is its still-capture folder: count stills and depth there and
             // size the folder; it has no map, so nothing is "missing".
             if scan.isFocusScan {
@@ -1297,6 +1299,8 @@ struct ScanCard: View {
 
                 // How much of it the Scan4D server holds, once its space syncs.
                 SyncLine(scan: scan)
+                // The splat the server made from it, and whether this phone has it (REQ-041).
+                LayerLine(scan: scan)
 
                 if let counts = itemCounts {
                     itemCountsText(counts)

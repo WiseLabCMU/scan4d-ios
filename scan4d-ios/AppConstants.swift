@@ -46,6 +46,7 @@ enum AppConstants {
         static let controlPlaneBundlesFilterOff = "controlPlaneBundlesFilterOff" // scans the last sync read as captured with the Privacy Filter off
         static let controlPlaneBundlesRefused = "controlPlaneBundlesRefused"   // bundles the server refused for good (403, 404, 413), with the version refused (JSON): not sent again until it changes or Retry
         static let controlPlaneBundleStates = "controlPlaneBundleStates"       // each scan's bundle as the server last reported it (JSON), for the sync badge after a relaunch
+        static let controlPlaneLayers = "controlPlaneLayers"                   // each scan's layers (its splat) as the server last reported them (JSON), for the card line after a relaunch (REQ-041)
         static let controlPlaneStateServer = "controlPlaneStateServer"         // the control plane (base URL) the confirmed spaces and bundle states came from; another one starts them afresh
         static let legacyControlPlaneSendPackages = "controlPlaneSendPackages" // builds before bundles: Send map packages (off = nothing but the JSON went); read once to deselect every scan, then removed
         static let controlPlaneAllowUntrusted = "controlPlaneAllowUntrusted" // accept the server's own (self-signed) certificate from the control plane and the upload hosts it names

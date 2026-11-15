@@ -28,6 +28,8 @@ The map holds no images or depth maps.
 
 The server can also ask for a focus scan of a region. The request waits in a to-do list (an urgent one also alerts once), and nothing is captured unless you open it and scan.
 
+**What the server makes and sends back:** the server can make a splat (a 3D reconstruction) of a scan from its bundle. The sync tells the app which of your synced scans have one, and a scan's card offers to download it. It is downloaded only when you tap Download, from the same server, with the same password, and kept in that scan's folder on the device, for viewing. It is never uploaded again, it is left out of iCloud backups, and it is deleted with the scan (or from the card, with a long press).
+
 If the server has a password, you enter it in the Server tab; it is kept in the device's Keychain and sent only to that server.
 
 Nothing is sent while the server field is empty. The server is the one you configure, normally your lab's own on its internal network.
