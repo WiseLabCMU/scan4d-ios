@@ -8,10 +8,11 @@ import UIKit
 // MARK: - Focus splats in AR (REQ-041)
 //
 // The space's focus splats over the camera, where they were captured. The session relocalizes into
-// the latest room scan's world map, as Rescan Space does, and draws nothing until it has; then each
-// splat goes in at its box (the box in that scan's raw frame, `FocusRegion.placement`, as focus
-// capture places it) times its `to_box`. Only splats: the room mesh is too rough to lay over the
-// room itself, and the point is a past state of a region over the region as it is now.
+// the latest room scan's world map, as Rescan Space does, and reads, decodes and draws no splat
+// until it has: relocalizing is work enough for a low-end phone. Then each splat goes in at its box
+// (the box in that scan's raw frame, `FocusRegion.placement`, as focus capture places it) times its
+// `to_box`. Only splats: the room mesh is too rough to lay over the room itself, and the point is a
+// past state of a region over the region as it is now.
 //
 // Its own ARSCNView and ARSession, never the capture's ARView (custom Metal in that RealityKit view
 // crashes on iOS 18, see Wireframe.metal), so the splats are drawn by the same SceneKit node
@@ -414,6 +415,10 @@ struct FocusSplatARView: View {
         }
         .onChange(of: fade) { _, _ in overlay.opacity = shownOpacity }
         .onChange(of: holding) { _, _ in overlay.opacity = shownOpacity }
+        // Out of the map's frame the hold button is disabled, so a hold's release would never come.
+        .onChange(of: session.aligned) { _, aligned in
+            if !aligned { holding = false }
+        }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
             .receive(on: DispatchQueue.main)) { _ in
             applyThermalState()
@@ -566,6 +571,9 @@ struct FocusSplatARView: View {
         .accessibilityLabel("Hide the splats")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { holding.toggle() }
+        // Nothing is drawn before AR finds the space.
+        .disabled(!session.aligned)
+        .opacity(session.aligned ? 1 : 0.4)
     }
 
     // MARK: Behaviour

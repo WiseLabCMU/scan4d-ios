@@ -67,7 +67,9 @@ struct FocusSplatPane: View {
         let local = layers.local[ScanLayers.key(scan.id, ScanLayer.splat)]
         ZStack {
             Color(white: 0.08).ignoresSafeArea()
-            if let cloud, let local {
+            // Out of the scene while AR is open (the decoded splat stays, and AR draws it): two
+            // splat views drawing at once is too much for a low-end phone.
+            if let cloud, let local, ar == nil {
                 SplatSceneView(cloud: cloud,
                                placement: SplatScene.placementInBox(local: local,
                                                                     remote: layers.layer(scan.id, kind: ScanLayer.splat),

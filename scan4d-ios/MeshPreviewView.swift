@@ -72,9 +72,11 @@ struct MeshPreviewContainer: View {
     @State private var arRequest: FocusARRequest?
     @State private var arOverlay: FocusSplatOverlay?
 
-    /// The focus scans made against the generation on screen.
+    /// The space's focus scans whose boxes are in the frame of the generation on screen: all of
+    /// them, whichever room scan each was captured against, bar a box drawn on another scan's raw
+    /// frame (`PreviewFocusScan.isDrawable`).
     private var focusScans: [PreviewFocusScan] {
-        PreviewFocusScan.made(against: isTimelineActive ? visibleScan?.id : openedScanId, in: location)
+        PreviewFocusScan.shown(on: isTimelineActive ? visibleScan?.id : openedScanId, in: location)
     }
 
     /// Everything the scene's focus boxes and splats follow; a change re-syncs them.
@@ -298,7 +300,8 @@ struct MeshPreviewContainer: View {
                             equirectLegendRow
                         }
                         if !shownFocusScans.isEmpty {
-                            FocusSplatLegend(scans: shownFocusScans, overlay: focusOverlay, mode: focusMode)
+                            // Dated: the rows span the space's history, not the generation on screen.
+                            FocusSplatLegend(scans: shownFocusScans, overlay: focusOverlay, mode: focusMode, dated: true)
                         }
                     }
                     .padding(metrics.cardPadding)

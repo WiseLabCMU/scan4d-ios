@@ -1,4 +1,5 @@
 import ARKit
+import SceneKit
 import simd
 import XCTest
 @testable import scan4d_ios
@@ -86,7 +87,48 @@ final class FocusSplatARTests: XCTestCase {
         XCTAssertTrue(FocusSplatStage.overlap(first, large, beside, SIMD3(0.1, 0.1, 0.1)))
     }
 
+    /// A focus scan is its own time slice: its box shows on every generation it is in the frame of,
+    /// not only on the room scan it was captured against.
+    func testAFocusBoxShowsOnEveryGenerationInItsFrame() {
+        let drawnOn = UUID(), other = UUID()
+        let canonical = FocusRegion(center: .zero, size: SIMD3(1, 1, 1), frameScanId: drawnOn)
+        let raw = FocusRegion(center: .zero, size: SIMD3(1, 1, 1), frameScanId: drawnOn, frameIsCanonical: false)
+        XCTAssertTrue(PreviewFocusScan.isDrawable(canonical, on: drawnOn))
+        XCTAssertTrue(PreviewFocusScan.isDrawable(canonical, on: other))
+        XCTAssertTrue(PreviewFocusScan.isDrawable(canonical, on: nil))
+        XCTAssertTrue(PreviewFocusScan.isDrawable(raw, on: drawnOn))
+        XCTAssertFalse(PreviewFocusScan.isDrawable(raw, on: other))
+        XCTAssertFalse(PreviewFocusScan.isDrawable(raw, on: nil))
+    }
+
+    /// AR builds, opens and draws nothing until the session is in the map's frame; lost after
+    /// that, what it drew hides.
+    func testNothingIsBuiltBeforeARFindsTheSpace() {
+        let view = SCNView(frame: CGRect(x: 0, y: 0, width: 10, height: 10))
+        view.scene = SCNScene()
+        let scan = PreviewFocusScan(id: UUID(), name: "Desk", capturedAt: Date(),
+                                    scanDirectory: FileManager.default.temporaryDirectory,
+                                    region: FocusRegion(center: .zero, size: SIMD3(1, 1, 1)))
+        let request = FocusARRequest(mapScanId: UUID(), mapScanName: "Lab", worldMapURL: URL(fileURLWithPath: "/dev/null"),
+                                     registration: nil, scans: [scan])
+        let overlay = FocusSplatOverlay()
+
+        overlay.sync(view: view, scans: [scan], mode: .splats, stage: request.stage(aligned: false))
+        XCTAssertNil(view.scene?.rootNode.childNode(withName: "focusOverlay", recursively: false))
+        XCTAssertNotNil(overlay.states[scan.id])
+
+        overlay.sync(view: view, scans: [scan], mode: .splats, stage: request.stage(aligned: true))
+        let group = view.scene?.rootNode.childNode(withName: "focusOverlay", recursively: false)
+        XCTAssertEqual(group?.isHidden, false)
+        XCTAssertEqual(group?.childNodes.filter { $0.name == "focusBox" }.count, 1)
+
+        overlay.sync(view: view, scans: [scan], mode: .splats, stage: request.stage(aligned: false))
+        XCTAssertEqual(group?.isHidden, true)
+        overlay.tearDown()
+    }
+
     func testRowsSayWhatCanBeTapped() {
+        XCTAssertFalse(FocusSplatLegend.look(.waiting, mode: .splats).tappable)
         XCTAssertTrue(FocusSplatLegend.look(.covered, mode: .splats).tappable)
         XCTAssertFalse(FocusSplatLegend.look(.tooLarge(count: 4_000_000), mode: .splats).tappable)
         XCTAssertTrue(FocusSplatLegend.look(.tooLarge(count: 4_000_000), mode: .splats).text.hasPrefix("4.00M"))

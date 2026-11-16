@@ -90,12 +90,14 @@ struct UserGuideView: View {
                               "When the server makes a splat (a photo-real 3D model) of a focus scan, the " +
                               "scan's card says so: tap Download. Tapping the card then opens the splat in " +
                               "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills. " +
-                              "The room's mesh preview shows the focus scans made in it: the scope button " +
-                              "steps through off, their boxes, and their boxes with splats drawn in place " +
-                              "of the mesh. Tap a focus scan in the legend to show, hide or download its splat. " +
+                              "The room's mesh preview shows all of the space's focus scans, whichever room " +
+                              "scan you are looking at: the scope button steps through off, their boxes, and " +
+                              "their boxes with splats drawn in place of the mesh. Tap a focus scan in the " +
+                              "legend to show, hide or download its splat. " +
                               "The AR button, in the mesh preview or beside a splat, lays the space's splats " +
                               "over the camera where they were captured: point at the space and move slowly " +
-                              "until the pill says Aligned (Try Again if it says Lost). Each box's label gives " +
+                              "until the pill says Aligned (Try Again if it says Lost); the splats load only " +
+                              "then. Each box's label gives " +
                               "the scan's date and age; tap a box to show or hide its splat, and hold the eye " +
                               "button or lower the slider to see the space as it is now."
                     )

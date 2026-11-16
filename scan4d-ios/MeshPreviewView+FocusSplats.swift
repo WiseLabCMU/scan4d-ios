@@ -5,28 +5,39 @@ import UIKit
 
 // MARK: - Focus splats in the room's 3D preview and in AR (REQ-041)
 //
-// The room preview draws the focus scans made against the generation on screen: each one's box,
-// and, once its splat is on this phone, the splat in place of the mesh inside the box (the mesh's
-// fragments inside a shown splat's box are discarded by a shader modifier). AR (FocusSplatAR.swift)
-// draws the space's focus splats over the camera instead, in the frame of the room scan it
-// relocalized into, with a chip over each box. Splats on the phone show by themselves, newest
-// first, within the budget; a legend row (or, in AR, a box) shows, hides or downloads its splat,
-// and the one asked for last always wins the budget. Boxes over the same place, one region scanned
-// at different times, show one splat at a time.
+// The room preview draws the space's focus scans on whichever generation is on screen, not only
+// the room scan each was captured against: a focus scan is its own time slice of a region. It
+// draws each one's box and, once its splat is on this phone, the splat in place of the mesh inside
+// the box (the mesh's fragments inside a shown splat's box are discarded by a shader modifier). AR
+// (FocusSplatAR.swift) draws the space's focus splats over the camera instead, in the frame of the
+// room scan it relocalized into, with a chip over each box, and reads nothing until it has. Splats
+// on the phone show by themselves, newest first, within the budget; a legend row (or, in AR, a
+// box) shows, hides or downloads its splat, and the one asked for last always wins the budget.
+// Boxes over the same place, one region scanned at different times, show one splat at a time.
 
 /// A focus scan the preview or AR can show, snapshotted on the main actor.
 struct PreviewFocusScan: Identifiable, Equatable {
     let id: UUID
     let name: String
     let capturedAt: Date
-    let parentScanId: UUID?
     let scanDirectory: URL
     let region: FocusRegion
 
-    /// The location's focus scans made against room scan `roomId`, newest first.
-    static func made(against roomId: UUID?, in location: ScanLocation?) -> [PreviewFocusScan] {
-        guard let roomId else { return [] }
-        return all(in: location).filter { $0.parentScanId == roomId }
+    /// The location's focus scans that can be drawn over room scan `roomId`'s mesh, newest first:
+    /// every one whose box is in that mesh's frame (`isDrawable`), whichever room scan it was
+    /// captured against.
+    static func shown(on roomId: UUID?, in location: ScanLocation?) -> [PreviewFocusScan] {
+        all(in: location).filter { isDrawable($0.region, on: roomId) }
+    }
+
+    /// Whether `region`'s box is in the frame of room scan `roomId`'s mesh in the preview. Every
+    /// registered generation's mesh is in the space's canonical frame, so a canonical box is in
+    /// all of them. A box drawn on a scan whose registration did not apply is in that scan's raw
+    /// frame, so it is drawn on that scan only.
+    static func isDrawable(_ region: FocusRegion, on roomId: UUID?) -> Bool {
+        if region.frameIsCanonical { return true }
+        guard let roomId else { return false }
+        return region.frameScanId == roomId
     }
 
     /// Every focus scan of the location that has a region, newest first.
@@ -37,7 +48,7 @@ struct PreviewFocusScan: Identifiable, Equatable {
             .compactMap { scan in
                 scan.focusRegion.map {
                     PreviewFocusScan(id: scan.id, name: scan.name, capturedAt: scan.capturedAt,
-                                     parentScanId: scan.parentScanId, scanDirectory: scan.scanDirectory, region: $0)
+                                     scanDirectory: scan.scanDirectory, region: $0)
                 }
             }
             .sorted { $0.capturedAt > $1.capturedAt }
@@ -81,8 +92,9 @@ enum FocusSplatStage {
     case preview
     /// AR: the session's world, which is the raw frame of room scan `mapScanId` once the session
     /// has relocalized into its map; `registration` takes that frame into the canonical one (nil
-    /// when none was applied). Nothing is drawn while `aligned` is false: outside the map's frame,
-    /// splats would sit metres off.
+    /// when none was applied). Nothing is read, decoded or drawn until `aligned` is first true:
+    /// relocalizing is work enough for a phone, and outside the map's frame splats would sit
+    /// metres off. When it goes false again, what is drawn hides and stays loaded.
     case world(mapScanId: UUID, registration: simd_float4x4?, aligned: Bool)
 
     var isWorld: Bool {
@@ -142,6 +154,8 @@ final class FocusSplatOverlay {
         case tooLarge(count: Int)
         /// Larger than the budget left while the phone is hot.
         case cooling
+        /// On the phone, in AR before it has found the space: nothing is read until then.
+        case waiting
         case failed(String)
         /// Not on the phone: the card's splat line (on the server, downloading, failed).
         case server(ScanLayers.Line)
@@ -253,9 +267,10 @@ final class FocusSplatOverlay {
         preloaded.merge(decoded) { _, newer in newer }
     }
 
-    /// The splats drawn now, for the other mode to take.
+    /// The splats drawn now, and those handed over and not drawn yet (AR closed before it found the
+    /// space), for the other mode to take.
     func decodedSplats() -> [UUID: Decoded] {
-        loaded.mapValues { Decoded(version: $0.version, cloud: $0.renderer.cloud) }
+        preloaded.merging(loaded.mapValues { Decoded(version: $0.version, cloud: $0.renderer.cloud) }) { _, drawn in drawn }
     }
 
     /// The focus scan whose chip or box is at `point` in the view (AR only), a chip first, then the
@@ -300,19 +315,31 @@ final class FocusSplatOverlay {
 
     private func apply() {
         guard let view, let scene = view.scene else { return }
+        let layers = ScanLayers.shared
+        if case .world(_, _, false) = stage {
+            // Not in the map's frame. Before AR first finds the space nothing is built, opened or
+            // drawn (handed-over splats wait in `preloaded`); after, what is drawn hides and stays.
+            self.group?.isHidden = true
+            if self.group == nil {
+                var waiting: [UUID: RowState] = [:]
+                for scan in scans {
+                    if layers.local[ScanLayers.key(scan.id, ScanLayer.splat)] != nil {
+                        waiting[scan.id] = .waiting
+                    } else {
+                        waiting[scan.id] = layers.line(for: scan.id).map { RowState.server($0) } ?? RowState.noSplat
+                    }
+                }
+                states = waiting
+            }
+            return
+        }
         let mesh = scene.rootNode.childNode(withName: "mesh", recursively: true)
         if !stage.isWorld, mesh == nil { return }
         let group = groupNode(in: scene)
-        switch stage {
-        case .preview:
-            // The mesh's own centring offset: boxes and splats are in the frame the mesh is in.
-            group.simdTransform = mesh?.simdWorldTransform ?? matrix_identity_float4x4
-            group.isHidden = false
-        case .world(_, _, let aligned):
-            group.simdTransform = matrix_identity_float4x4
-            group.isHidden = !aligned
-        }
-        let layers = ScanLayers.shared
+        // The preview: the mesh's own centring offset, so boxes and splats are in the frame the
+        // mesh is in. AR: the session's world.
+        group.simdTransform = stage.isWorld ? matrix_identity_float4x4 : mesh?.simdWorldTransform ?? matrix_identity_float4x4
+        group.isHidden = false
 
         let ids = Set(scans.map(\.id))
         for (id, node) in boxes where !ids.contains(id) {
@@ -707,6 +734,8 @@ struct FocusSplatLegend: View {
             return ("exclamationmark.triangle", millions(count) + ", too large for this phone", .orange, false)
         case .cooling:
             return ("thermometer.high", "paused while the phone is hot", .orange, false)
+        case .waiting:
+            return ("location.magnifyingglass", "waiting for AR to find the space", .white.opacity(0.6), false)
         case .failed(let message):
             return ("exclamationmark.triangle", message, .yellow, true)
         case .server(let line):
