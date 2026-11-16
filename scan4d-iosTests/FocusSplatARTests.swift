@@ -1,0 +1,117 @@
+import ARKit
+import simd
+import XCTest
+@testable import scan4d_ios
+
+/// Focus splats in AR (REQ-041): when the session counts as in the map's frame, where a box goes in
+/// that frame, which boxes are over the same place, and what the rows and the pill say.
+final class FocusSplatARTests: XCTestCase {
+
+    private func assertEqual(_ lhs: simd_float4x4, _ rhs: simd_float4x4, file: StaticString = #filePath, line: UInt = #line) {
+        for column in 0..<4 {
+            for row in 0..<4 {
+                XCTAssertEqual(lhs[column][row], rhs[column][row], accuracy: 1e-5, file: file, line: line)
+            }
+        }
+    }
+
+    func testTrackingStatesReduceToWhatARNeeds() {
+        XCTAssertEqual(FocusARTracking(.normal), .normal)
+        XCTAssertEqual(FocusARTracking(.notAvailable), .notAvailable)
+        XCTAssertEqual(FocusARTracking(.limited(.initializing)), .initializing)
+        XCTAssertEqual(FocusARTracking(.limited(.relocalizing)), .relocalizing)
+        XCTAssertEqual(FocusARTracking(.limited(.excessiveMotion)), .excessiveMotion)
+        XCTAssertEqual(FocusARTracking(.limited(.insufficientFeatures)), .insufficientFeatures)
+    }
+
+    /// Aligned only after a relocalization completes; motion keeps it; a re-initialization that comes
+    /// back without relocalizing is a fresh frame, and only another relocalization ends that.
+    func testTheMapFrameFollowsRelocalization() {
+        var frame = FocusARMapFrame()
+        XCTAssertFalse(frame.aligned)
+        frame.update(.initializing)
+        frame.update(.relocalizing)
+        XCTAssertFalse(frame.aligned)
+        frame.update(.normal)
+        XCTAssertTrue(frame.aligned)
+        frame.update(.excessiveMotion)
+        frame.update(.insufficientFeatures)
+        XCTAssertTrue(frame.aligned)
+
+        frame.update(.initializing)
+        XCTAssertFalse(frame.aligned)
+        frame.update(.normal)
+        XCTAssertFalse(frame.aligned)
+        XCTAssertTrue(frame.freshFrame)
+
+        frame.update(.relocalizing)
+        XCTAssertFalse(frame.freshFrame)
+        frame.update(.normal)
+        XCTAssertTrue(frame.aligned)
+    }
+
+    /// AR puts a canonical box in the map scan's raw frame through the inverse of its registration,
+    /// as focus capture does; a box drawn raw on that same scan is already there. The preview keeps
+    /// the region's own frame.
+    func testABoxGoesIntoTheMapScansRawFrame() {
+        let mapScan = UUID()
+        var registration = simd_float4x4(simd_quatf(angle: 0.4, axis: SIMD3<Float>(0, 1, 0)))
+        registration.columns.3 = SIMD4<Float>(1, 0, -2, 1)
+        let canonical = FocusRegion(center: SIMD3(0.5, 0.4, 1), yaw: 0.2, size: SIMD3(1, 0.8, 0.6))
+        let raw = FocusRegion(center: SIMD3(0.5, 0.4, 1), yaw: 0.2, size: SIMD3(1, 0.8, 0.6),
+                              frameScanId: mapScan, frameIsCanonical: false)
+
+        let world = FocusSplatStage.world(mapScanId: mapScan, registration: registration, aligned: true)
+        assertEqual(world.boxFrame(canonical), registration.inverse * canonical.transform)
+        assertEqual(world.boxFrame(raw), raw.transform)
+        assertEqual(world.fromCanonical, registration.inverse)
+
+        let unregistered = FocusSplatStage.world(mapScanId: mapScan, registration: nil, aligned: false)
+        assertEqual(unregistered.boxFrame(canonical), canonical.transform)
+        assertEqual(FocusSplatStage.preview.boxFrame(canonical), canonical.transform)
+        XCTAssertTrue(world.isWorld)
+        XCTAssertFalse(FocusSplatStage.preview.isWorld)
+    }
+
+    /// One region scanned twice is the same place; regions side by side are not.
+    func testBoxesOverTheSamePlaceOverlap() {
+        let half = SIMD3<Float>(0.4, 0.3, 0.4)
+        let first = FocusRegion(center: SIMD3(0, 0.3, 0), size: half * 2).transform
+        let redrawn = FocusRegion(center: SIMD3(0.15, 0.3, -0.1), yaw: 0.3, size: half * 2).transform
+        let beside = FocusRegion(center: SIMD3(1.0, 0.3, 0), size: half * 2).transform
+        XCTAssertTrue(FocusSplatStage.overlap(first, half, redrawn, half))
+        XCTAssertFalse(FocusSplatStage.overlap(first, half, beside, half))
+        // A small box inside a large one: the small one's centre is inside.
+        let large = SIMD3<Float>(1.5, 1, 1.5)
+        XCTAssertTrue(FocusSplatStage.overlap(first, large, beside, SIMD3(0.1, 0.1, 0.1)))
+    }
+
+    func testRowsSayWhatCanBeTapped() {
+        XCTAssertTrue(FocusSplatLegend.look(.covered, mode: .splats).tappable)
+        XCTAssertFalse(FocusSplatLegend.look(.tooLarge(count: 4_000_000), mode: .splats).tappable)
+        XCTAssertTrue(FocusSplatLegend.look(.tooLarge(count: 4_000_000), mode: .splats).text.hasPrefix("4.00M"))
+        XCTAssertFalse(FocusSplatLegend.look(.cooling, mode: .splats).tappable)
+        let day = Date(timeIntervalSince1970: 1_790_000_000)
+        XCTAssertTrue(FocusSplatLegend.dateLine(day).hasPrefix(FocusSplatLegend.shortDate(day) + " · "))
+    }
+
+    func testThePillNamesTheState() {
+        XCTAssertEqual(FocusSplatARView.pill(.finding(since: Date(), lost: false)).text, "Relocalizing…")
+        XCTAssertEqual(FocusSplatARView.pill(.finding(since: Date(), lost: true)).text, "Lost")
+        XCTAssertEqual(FocusSplatARView.pill(.freshFrame).text, "Lost")
+        XCTAssertEqual(FocusSplatARView.pill(.aligned(note: nil)).text, "Aligned")
+        XCTAssertEqual(FocusSplatARView.pill(.aligned(note: "move slower")).text, "Aligned · move slower")
+    }
+
+    /// The budget shrinks while the phone is hot and never goes below nothing.
+    func testTheBudgetFollowsItsScale() {
+        let overlay = FocusSplatOverlay()
+        XCTAssertEqual(overlay.budget, AppConstants.splatPreviewBudget)
+        overlay.setBudgetScale(AppConstants.splatARSeriousBudgetShare)
+        XCTAssertEqual(overlay.budget, Int(Double(AppConstants.splatPreviewBudget) * AppConstants.splatARSeriousBudgetShare))
+        overlay.setBudgetScale(0)
+        XCTAssertEqual(overlay.budget, 0)
+        overlay.selection = .init(askedFor: [UUID()])
+        XCTAssertEqual(overlay.selection.askedFor.count, 1)
+    }
+}

@@ -701,6 +701,10 @@ enum AppConstants {
     // Focus splats in the room's 3D preview (REQ-041)
     static let splatPreviewBudget = 3_000_000                  // Gaussians drawn at once; about two focus splats. To measure on device
     static let splatPreviewMaxCuts = 8                         // focus boxes the mesh can be cut by at once (one shader argument each)
+    static let splatChipHeightM: Float = 0.09                  // AR: the label over each focus box
+    static let splatARSlowFindSeconds: Double = 20             // AR: relocalizing this long, the hint says where to stand
+    static let splatARSeriousBudgetShare: Double = 0.5         // AR: the splat budget's share at thermal state serious (none at critical)
+    static let splatARToastSeconds: Double = 4                 // AR: how long the "phone is hot" note stays
     // Focus region editor (draw the box on a room scan's mesh)
     static let focusRegionObjectMarginM: Float = 0.1           // a RoomPlan object's box grows by this on each side...
     static let focusRegionObjectHeadroomM: Float = 0.4         // ...and this upward, for what sits on it (tools on a table)

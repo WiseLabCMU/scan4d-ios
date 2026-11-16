@@ -1,32 +1,43 @@
 import SceneKit
 import simd
 import SwiftUI
+import UIKit
 
-// MARK: - Focus splats in the room's 3D preview (REQ-041)
+// MARK: - Focus splats in the room's 3D preview and in AR (REQ-041)
 //
 // The room preview draws the focus scans made against the generation on screen: each one's box,
 // and, once its splat is on this phone, the splat in place of the mesh inside the box (the mesh's
-// fragments inside a shown splat's box are discarded by a shader modifier). Splats on the phone show
-// by themselves, newest first, within `AppConstants.splatPreviewBudget`; a legend row per scan shows,
-// hides or downloads its splat, and the one asked for last always wins the budget.
+// fragments inside a shown splat's box are discarded by a shader modifier). AR (FocusSplatAR.swift)
+// draws the space's focus splats over the camera instead, in the frame of the room scan it
+// relocalized into, with a chip over each box. Splats on the phone show by themselves, newest
+// first, within the budget; a legend row (or, in AR, a box) shows, hides or downloads its splat,
+// and the one asked for last always wins the budget. Boxes over the same place, one region scanned
+// at different times, show one splat at a time.
 
-/// A focus scan the room preview can show, snapshotted on the main actor.
+/// A focus scan the preview or AR can show, snapshotted on the main actor.
 struct PreviewFocusScan: Identifiable, Equatable {
     let id: UUID
     let name: String
     let capturedAt: Date
+    let parentScanId: UUID?
     let scanDirectory: URL
     let region: FocusRegion
 
     /// The location's focus scans made against room scan `roomId`, newest first.
     static func made(against roomId: UUID?, in location: ScanLocation?) -> [PreviewFocusScan] {
-        guard let roomId, let location else { return [] }
+        guard let roomId else { return [] }
+        return all(in: location).filter { $0.parentScanId == roomId }
+    }
+
+    /// Every focus scan of the location that has a region, newest first.
+    static func all(in location: ScanLocation?) -> [PreviewFocusScan] {
+        guard let location else { return [] }
         return location.scans
-            .filter { $0.isFocusScan && $0.parentScanId == roomId }
+            .filter { $0.isFocusScan }
             .compactMap { scan in
                 scan.focusRegion.map {
                     PreviewFocusScan(id: scan.id, name: scan.name, capturedAt: scan.capturedAt,
-                                     scanDirectory: scan.scanDirectory, region: $0)
+                                     parentScanId: scan.parentScanId, scanDirectory: scan.scanDirectory, region: $0)
                 }
             }
             .sorted { $0.capturedAt > $1.capturedAt }
@@ -63,7 +74,57 @@ enum FocusOverlayMode: Equatable {
     }
 }
 
-/// The focus boxes and splats in the preview's scene, and what each legend row says.
+/// Where the overlay draws its boxes and splats.
+enum FocusSplatStage {
+    /// The room preview: the room mesh's frame (canonical, moved by the mesh's centring offset);
+    /// the mesh is cut away inside shown splats.
+    case preview
+    /// AR: the session's world, which is the raw frame of room scan `mapScanId` once the session
+    /// has relocalized into its map; `registration` takes that frame into the canonical one (nil
+    /// when none was applied). Nothing is drawn while `aligned` is false: outside the map's frame,
+    /// splats would sit metres off.
+    case world(mapScanId: UUID, registration: simd_float4x4?, aligned: Bool)
+
+    var isWorld: Bool {
+        if case .world = self { return true }
+        return false
+    }
+
+    /// The box of `region` into this stage's frame. In AR, the same placement focus capture uses
+    /// for its box (`FocusRegion.placement(inRawFrameOf:appliedRegistration:)`).
+    func boxFrame(_ region: FocusRegion) -> simd_float4x4 {
+        switch self {
+        case .preview:
+            return region.transform
+        case let .world(mapScanId, registration, _):
+            return region.placement(inRawFrameOf: mapScanId, appliedRegistration: registration).boxToMap
+        }
+    }
+
+    /// The canonical frame into this stage's frame.
+    var fromCanonical: simd_float4x4 {
+        switch self {
+        case .preview:
+            return matrix_identity_float4x4
+        case let .world(_, registration, _):
+            return (registration ?? matrix_identity_float4x4).inverse
+        }
+    }
+
+    /// Whether two boxes (box to frame, half extents) are over the same place: either's centre lies
+    /// inside the other. Regions side by side never are; one region scanned twice is.
+    static func overlap(_ first: simd_float4x4, _ firstHalf: SIMD3<Float>,
+                        _ second: simd_float4x4, _ secondHalf: SIMD3<Float>) -> Bool {
+        func inside(_ point: SIMD4<Float>, _ box: simd_float4x4, _ half: SIMD3<Float>) -> Bool {
+            let local = box.inverse * point
+            return abs(local.x) <= half.x && abs(local.y) <= half.y && abs(local.z) <= half.z
+        }
+        return inside(second.columns.3, first, firstHalf) || inside(first.columns.3, second, secondHalf)
+    }
+}
+
+/// The focus boxes and splats in a SceneKit view (the preview's, or AR's), and what each legend
+/// row says.
 @Observable
 @MainActor
 final class FocusSplatOverlay {
@@ -75,6 +136,12 @@ final class FocusSplatOverlay {
         case hidden
         /// On the phone, not drawn: the splats asked for since fill the budget.
         case overBudget
+        /// On the phone, not drawn: a newer splat (or one asked for since) of the same place is.
+        case covered
+        /// Larger than the whole budget: this phone never draws it.
+        case tooLarge(count: Int)
+        /// Larger than the budget left while the phone is hot.
+        case cooling
         case failed(String)
         /// Not on the phone: the card's splat line (on the server, downloading, failed).
         case server(ScanLayers.Line)
@@ -82,9 +149,38 @@ final class FocusSplatOverlay {
         case noSplat
     }
 
+    /// The splats asked for and switched off; switching between the preview and AR carries it.
+    struct Selection: Equatable {
+        var askedFor: [UUID] = []
+        var switchedOff: Set<UUID> = []
+    }
+
+    /// A splat decoded elsewhere (the other mode, the focus viewer), drawn without decoding again.
+    struct Decoded {
+        let version: String
+        let cloud: SplatCloud
+    }
+
     private(set) var states: [UUID: RowState] = [:]
-    /// Gaussians drawn now, against `AppConstants.splatPreviewBudget`.
+    /// Gaussians drawn now, against `budget`.
     private(set) var drawnCount = 0
+    /// The share of `AppConstants.splatPreviewBudget` in use: below 1 while the phone is hot (AR).
+    private(set) var budgetScale: Double = 1
+    /// Every splat's opacity, 0...1 (AR's fade and hold).
+    @ObservationIgnored var opacity: Float = 1 {
+        didSet { for entry in loaded.values { entry.renderer.opacity = opacity } }
+    }
+
+    /// Gaussians that may be drawn at once.
+    var budget: Int { Int(Double(AppConstants.splatPreviewBudget) * max(0, min(1, budgetScale))) }
+
+    var selection: Selection {
+        get { Selection(askedFor: askedFor, switchedOff: switchedOff) }
+        set {
+            askedFor = newValue.askedFor
+            switchedOff = newValue.switchedOff
+        }
+    }
 
     private var switchedOff: Set<UUID> = []
     /// Scans whose splat was asked for, most recent first: they win the budget in that order.
@@ -97,26 +193,34 @@ final class FocusSplatOverlay {
         let node: SCNNode
     }
 
+    private static let hitPrefix = "focusHit:"
+    private static let chipPrefix = "focusChip:"
+
     @ObservationIgnored private weak var view: SCNView?
     @ObservationIgnored private var scans: [PreviewFocusScan] = []
     @ObservationIgnored private var mode: FocusOverlayMode = .off
+    @ObservationIgnored private var stage: FocusSplatStage = .preview
     @ObservationIgnored private var group: SCNNode?
     @ObservationIgnored private var boxes: [UUID: SCNNode] = [:]
+    @ObservationIgnored private var chips: [UUID: String] = [:]
     @ObservationIgnored private var loaded: [UUID: Loaded] = [:]
     @ObservationIgnored private var opening: [UUID: String] = [:]
+    @ObservationIgnored private var preloaded: [UUID: Decoded] = [:]
     @ObservationIgnored private var cutInstalled = false
 
-    /// Brings the scene up to date with `scans` and `mode`. Call whenever either changes, a copy
-    /// lands on the phone, or a generation loads. Nothing until the room mesh is in the scene.
-    func sync(view: SCNView?, scans: [PreviewFocusScan], mode: FocusOverlayMode) {
+    /// Brings the scene up to date with `scans`, `mode` and `stage`. Call whenever one changes, a
+    /// copy lands on the phone, or a generation loads. In the preview, nothing until the room mesh
+    /// is in the scene.
+    func sync(view: SCNView?, scans: [PreviewFocusScan], mode: FocusOverlayMode, stage: FocusSplatStage = .preview) {
         self.view = view
         self.scans = scans
         self.mode = mode
+        self.stage = stage
         apply()
     }
 
-    /// A legend row's tap: shows or hides a splat on the phone, or downloads one from the server
-    /// (it shows once it lands).
+    /// A legend row's tap (or a box's, in AR): shows or hides a splat on the phone, or downloads one
+    /// from the server (it shows once it lands).
     func tap(_ scan: PreviewFocusScan) {
         let layers = ScanLayers.shared
         if layers.local[ScanLayers.key(scan.id, ScanLayer.splat)] != nil {
@@ -136,15 +240,58 @@ final class FocusSplatOverlay {
         apply()
     }
 
-    /// Takes everything out of the scene (the preview is closing).
+    /// Shrinks (or restores) the budget, unloading what no longer fits.
+    func setBudgetScale(_ scale: Double) {
+        guard scale != budgetScale else { return }
+        budgetScale = scale
+        apply()
+    }
+
+    /// Splats decoded elsewhere, drawn by the next sync instead of decoded again; those it does not
+    /// draw are dropped.
+    func adopt(_ decoded: [UUID: Decoded]) {
+        preloaded.merge(decoded) { _, newer in newer }
+    }
+
+    /// The splats drawn now, for the other mode to take.
+    func decodedSplats() -> [UUID: Decoded] {
+        loaded.mapValues { Decoded(version: $0.version, cloud: $0.renderer.cloud) }
+    }
+
+    /// The focus scan whose chip or box is at `point` in the view (AR only), a chip first, then the
+    /// nearest box.
+    func scanId(at point: CGPoint) -> UUID? {
+        guard stage.isWorld, let view, let group, !group.isHidden else { return nil }
+        let hits = view.hitTest(point, options: [
+            .rootNode: group,
+            .searchMode: SCNHitTestSearchMode.all.rawValue,
+            .backFaceCulling: false,
+            .ignoreHiddenNodes: true,
+        ])
+        var nearestBox: UUID?
+        for hit in hits {
+            guard let name = hit.node.name else { continue }
+            if name.hasPrefix(Self.chipPrefix) {
+                return UUID(uuidString: String(name.dropFirst(Self.chipPrefix.count)))
+            }
+            if nearestBox == nil, name.hasPrefix(Self.hitPrefix) {
+                nearestBox = UUID(uuidString: String(name.dropFirst(Self.hitPrefix.count)))
+            }
+        }
+        return nearestBox
+    }
+
+    /// Takes everything out of the scene (the view is closing, or the other mode takes over).
     func tearDown() {
         for entry in loaded.values { Self.release(entry) }
         loaded = [:]
         opening = [:]
+        preloaded = [:]
         group?.removeFromParentNode()
         group = nil
         boxes = [:]
-        view?.rendersContinuously = false
+        chips = [:]
+        if !stage.isWorld { view?.rendersContinuously = false }
         drawnCount = 0
         states = [:]
     }
@@ -152,28 +299,42 @@ final class FocusSplatOverlay {
     // MARK: Applying
 
     private func apply() {
-        guard let view, let scene = view.scene,
-              let mesh = scene.rootNode.childNode(withName: "mesh", recursively: true) else { return }
+        guard let view, let scene = view.scene else { return }
+        let mesh = scene.rootNode.childNode(withName: "mesh", recursively: true)
+        if !stage.isWorld, mesh == nil { return }
         let group = groupNode(in: scene)
-        // The mesh's own centring offset: boxes and splats are in the frame the mesh is in.
-        group.simdTransform = mesh.simdWorldTransform
+        switch stage {
+        case .preview:
+            // The mesh's own centring offset: boxes and splats are in the frame the mesh is in.
+            group.simdTransform = mesh?.simdWorldTransform ?? matrix_identity_float4x4
+            group.isHidden = false
+        case .world(_, _, let aligned):
+            group.simdTransform = matrix_identity_float4x4
+            group.isHidden = !aligned
+        }
         let layers = ScanLayers.shared
 
         let ids = Set(scans.map(\.id))
         for (id, node) in boxes where !ids.contains(id) {
             node.removeFromParentNode()
             boxes[id] = nil
+            chips[id] = nil
         }
+        var frames: [UUID: simd_float4x4] = [:]
         for scan in scans {
+            let frame = stage.boxFrame(scan.region)
+            frames[scan.id] = frame
             let box = boxes[scan.id] ?? makeBox(scan, in: group)
-            box.simdTransform = scan.region.transform
+            box.simdTransform = frame
             box.isHidden = mode == .off
         }
 
-        // Which splats to draw: those asked for, then the newest, while the budget lasts.
+        // Which splats to draw: those asked for, then the newest, while the budget lasts; of boxes
+        // over the same place, only the first.
         let order = scans.sorted { rank($0.id) < rank($1.id) }
-        var budget = AppConstants.splatPreviewBudget
+        var left = budget
         var wanted: [UUID: ScanLayer] = [:]
+        var drawnBoxes: [(frame: simd_float4x4, half: SIMD3<Float>)] = []
         var next: [UUID: RowState] = [:]
         for scan in order {
             guard let local = layers.local[ScanLayers.key(scan.id, ScanLayer.splat)] else {
@@ -188,13 +349,28 @@ final class FocusSplatOverlay {
                 next[scan.id] = .hidden
                 continue
             }
+            let frame = frames[scan.id] ?? scan.region.transform
+            let half = scan.region.halfExtents
+            if drawnBoxes.contains(where: { FocusSplatStage.overlap($0.frame, $0.half, frame, half) }) {
+                next[scan.id] = .covered
+                continue
+            }
             let count = local.meta?.count ?? 0
-            guard count <= budget else {
+            if count > AppConstants.splatPreviewBudget {
+                next[scan.id] = .tooLarge(count: count)
+                continue
+            }
+            if count > budget {
+                next[scan.id] = .cooling
+                continue
+            }
+            guard count <= left else {
                 next[scan.id] = .overBudget
                 continue
             }
-            budget -= count
+            left -= count
             wanted[scan.id] = local
+            drawnBoxes.append((frame, half))
         }
 
         for (id, entry) in loaded where wanted[id]?.version != entry.version {
@@ -203,6 +379,9 @@ final class FocusSplatOverlay {
         }
         for scan in order {
             guard let local = wanted[scan.id] else { continue }
+            if loaded[scan.id] == nil, let ready = preloaded[scan.id], ready.version == local.version {
+                install(ready.cloud, scanId: scan.id, version: local.version, in: group)
+            }
             if let entry = loaded[scan.id] {
                 guard let placement = placement(scan, local) else { continue }
                 entry.node.simdTransform = placement
@@ -212,11 +391,26 @@ final class FocusSplatOverlay {
                 next[scan.id] = failures[scan.id].map { RowState.failed($0) } ?? .opening
             }
         }
+        // Decoded splats not drawn now are not kept.
+        preloaded = [:]
 
         states = next
         drawnCount = loaded.values.reduce(0) { $0 + $1.renderer.cloud.count }
-        applyCut(in: scene, group: group)
-        view.rendersContinuously = !loaded.isEmpty
+        for scan in scans {
+            guard let box = boxes[scan.id] else { continue }
+            var shown = false
+            if case .shown? = next[scan.id] { shown = true }
+            // A drawn splat keeps a faint box: an offset between the two is a placement error.
+            box.geometry?.firstMaterial?.transparency = shown ? 0.35 : 1
+            if stage.isWorld {
+                updateChip(scan, state: FocusSplatLegend.live(next[scan.id], scanId: scan.id), on: box)
+            }
+        }
+        if !stage.isWorld {
+            applyCut(in: scene, group: group)
+            // AR's view draws every camera frame anyway.
+            view.rendersContinuously = !loaded.isEmpty
+        }
     }
 
     /// Asked for (most recent first), then newest.
@@ -237,18 +431,19 @@ final class FocusSplatOverlay {
     private func makeBox(_ scan: PreviewFocusScan, in group: SCNNode) -> SCNNode {
         let node = SCNNode(geometry: SplatScene.boxOutline(halfExtents: scan.region.halfExtents))
         node.name = "focusBox"
+        if stage.isWorld { node.addChildNode(Self.hitVolume(scan)) }
         group.addChildNode(node)
         boxes[scan.id] = node
         return node
     }
 
-    /// The splat in the room: its box's transform times `to_box` (the box drawn here and the splat
-    /// share the region), else the server's `to_canonical`.
+    /// The splat in the stage's frame: its box's transform times `to_box` (the box drawn here and
+    /// the splat share the region), else the server's `to_canonical`.
     private func placement(_ scan: PreviewFocusScan, _ local: ScanLayer) -> simd_float4x4? {
         let remote = ScanLayers.shared.layer(scan.id, kind: ScanLayer.splat)
         let placement = remote?.version == local.version ? (remote?.placement ?? local.placement) : local.placement
-        if let toBox = SplatScene.matrix(placement?.toBox) { return scan.region.transform * toBox }
-        return SplatScene.matrix(placement?.toCanonical)
+        if let toBox = SplatScene.matrix(placement?.toBox) { return stage.boxFrame(scan.region) * toBox }
+        return SplatScene.matrix(placement?.toCanonical).map { stage.fromCanonical * $0 }
     }
 
     private func open(_ scan: PreviewFocusScan, _ local: ScanLayer) {
@@ -258,6 +453,7 @@ final class FocusSplatOverlay {
             return
         }
         let id = scan.id, version = local.version
+        let context = stage.isWorld ? "in AR" : "in the room preview"
         opening[id] = version
         let started = CFAbsoluteTimeGetCurrent()
         Task {
@@ -268,20 +464,26 @@ final class FocusSplatOverlay {
             opening[id] = nil
             switch result {
             case .success(let cloud):
-                PerfDiag.log(String(format: "[Splat] %@ in the room preview: %ld Gaussians opened in %.1f s (%@)",
-                                    id.uuidString, cloud.count, CFAbsoluteTimeGetCurrent() - started, cloud.decodeNote))
-                if let group {
-                    let renderer = SplatRenderer(cloud: cloud)
-                    let node = renderer.makeNode()
-                    group.addChildNode(node)
-                    loaded[id] = Loaded(version: version, renderer: renderer, node: node)
-                }
+                PerfDiag.log(String(format: "[Splat] %@ %@: %ld Gaussians opened in %.1f s (%@)",
+                                    id.uuidString, context, cloud.count, CFAbsoluteTimeGetCurrent() - started,
+                                    cloud.decodeNote))
+                if let group { install(cloud, scanId: id, version: version, in: group) }
             case .failure(let error):
                 failures[id] = error.localizedDescription
-                PerfDiag.log("[Splat] \(id.uuidString) in the room preview: not opened: \(error.localizedDescription)")
+                PerfDiag.log("[Splat] \(id.uuidString) \(context): not opened: \(error.localizedDescription)")
             }
             apply()
         }
+    }
+
+    private func install(_ cloud: SplatCloud, scanId: UUID, version: String, in group: SCNNode) {
+        // A decode still running for this version is not needed any more.
+        opening[scanId] = nil
+        let renderer = SplatRenderer(cloud: cloud)
+        renderer.opacity = opacity
+        let node = renderer.makeNode()
+        group.addChildNode(node)
+        loaded[scanId] = Loaded(version: version, renderer: renderer, node: node)
     }
 
     /// SceneKit holds a node's renderer unretained and may be drawing with it on its render
@@ -293,7 +495,56 @@ final class FocusSplatOverlay {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { _ = renderer }
     }
 
-    // MARK: The cut
+    // MARK: AR: chips and tap targets
+
+    /// An invisible box filling the region, so a tap anywhere on it finds its scan.
+    private static func hitVolume(_ scan: PreviewFocusScan) -> SCNNode {
+        let size = scan.region.size
+        let geometry = SCNBox(width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z), chamferRadius: 0)
+        let material = SCNMaterial()
+        material.colorBufferWriteMask = []
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = false
+        material.isDoubleSided = true
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry)
+        node.name = hitPrefix + scan.id.uuidString
+        return node
+    }
+
+    /// The label over a box, facing the camera: the scan's name, when it was captured and how long
+    /// ago, and what its splat is doing. Redrawn only when its text changes.
+    private func updateChip(_ scan: PreviewFocusScan, state: RowState, on box: SCNNode) {
+        let look = FocusSplatLegend.look(state, mode: mode)
+        let detail = FocusSplatLegend.dateLine(scan.capturedAt) + " · " + look.text
+        let key = scan.name + "\n" + detail
+        guard chips[scan.id] != key else { return }
+        chips[scan.id] = key
+        for old in box.childNodes where old.name?.hasPrefix(Self.chipPrefix) == true {
+            old.removeFromParentNode()
+        }
+        let image = SplatChip.image(title: scan.name, detail: detail, detailColor: UIColor(look.color))
+        let height = CGFloat(AppConstants.splatChipHeightM)
+        let plane = SCNPlane(width: height * image.size.width / max(image.size.height, 1), height: height)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = image
+        material.isDoubleSided = true
+        material.readsFromDepthBuffer = false
+        material.writesToDepthBuffer = false
+        plane.materials = [material]
+        let chip = SCNNode(geometry: plane)
+        chip.name = Self.chipPrefix + scan.id.uuidString
+        // After the splats, which write no depth, so the chip stays readable over its own splat.
+        chip.renderingOrder = 2_000
+        chip.simdPosition = SIMD3<Float>(0, scan.region.halfExtents.y + AppConstants.splatChipHeightM, 0)
+        let billboard = SCNBillboardConstraint()
+        billboard.freeAxes = .all
+        chip.constraints = [billboard]
+        box.addChildNode(chip)
+    }
+
+    // MARK: The cut (preview)
 
     /// Discards the mesh's fragments inside a shown splat's box. Each box is a matrix from the
     /// scene's world into the box's unit cube; shader modifiers take no arrays, hence the names.
@@ -346,12 +597,50 @@ final class FocusSplatOverlay {
     }
 }
 
-/// The legend's focus rows: one per focus scan made against the generation on screen, with what
-/// its splat is doing; a tap shows, hides or downloads it.
+/// The image on a box's chip in AR: a title line and a coloured detail line on a dark rounded card.
+enum SplatChip {
+    static func image(title: String, detail: String, detailColor: UIColor) -> UIImage {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let titleAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 30, weight: .semibold),
+            .foregroundColor: UIColor.white,
+            .paragraphStyle: paragraph,
+        ]
+        let detailAttributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 24, weight: .regular),
+            .foregroundColor: detailColor,
+            .paragraphStyle: paragraph,
+        ]
+        let titleSize = (title as NSString).size(withAttributes: titleAttributes)
+        let detailSize = (detail as NSString).size(withAttributes: detailAttributes)
+        let pad: CGFloat = 16, gap: CGFloat = 4, maxWidth: CGFloat = 900
+        let width = ceil(min(max(titleSize.width, detailSize.width) + 2 * pad, maxWidth))
+        let height = ceil(titleSize.height + gap + detailSize.height + 2 * pad * 0.75)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let size = CGSize(width: width, height: height)
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            UIColor(white: 0, alpha: 0.6).setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 14).fill()
+            (title as NSString).draw(in: CGRect(x: pad, y: pad * 0.75, width: width - 2 * pad, height: titleSize.height),
+                                     withAttributes: titleAttributes)
+            (detail as NSString).draw(in: CGRect(x: pad, y: pad * 0.75 + titleSize.height + gap,
+                                                 width: width - 2 * pad, height: detailSize.height),
+                                      withAttributes: detailAttributes)
+        }
+    }
+}
+
+/// The legend's focus rows: one per focus scan, with what its splat is doing; a tap shows, hides or
+/// downloads it.
 struct FocusSplatLegend: View {
     let scans: [PreviewFocusScan]
     let overlay: FocusSplatOverlay
     let mode: FocusOverlayMode
+    /// Each row names when its scan was captured (AR, where scans of several dates are listed).
+    var dated = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -359,7 +648,7 @@ struct FocusSplatLegend: View {
                 Image(systemName: "scope")
                 Text("Focus scans")
                 if mode == .splats, overlay.drawnCount > 0 {
-                    Text(Self.millions(overlay.drawnCount) + " of " + Self.millions(AppConstants.splatPreviewBudget))
+                    Text(Self.millions(overlay.drawnCount) + " of " + Self.millions(overlay.budget))
                         .foregroundColor(.white.opacity(0.6))
                 }
             }
@@ -374,7 +663,7 @@ struct FocusSplatLegend: View {
                         Image(systemName: look.icon)
                             .foregroundColor(.yellow)
                             .frame(width: 12)
-                        Text(scan.name)
+                        Text(dated ? scan.name + " · " + Self.shortDate(scan.capturedAt) : scan.name)
                             .foregroundColor(.white)
                             .lineLimit(1)
                         Text(look.text)
@@ -412,6 +701,12 @@ struct FocusSplatLegend: View {
                     mode == .splats)
         case .overBudget:
             return ("cube.transparent", "tap to show (hides another)", .orange, true)
+        case .covered:
+            return ("square.on.square.dashed", "tap to show instead", .white.opacity(0.6), true)
+        case .tooLarge(let count):
+            return ("exclamationmark.triangle", millions(count) + ", too large for this phone", .orange, false)
+        case .cooling:
+            return ("thermometer.high", "paused while the phone is hot", .orange, false)
         case .failed(let message):
             return ("exclamationmark.triangle", message, .yellow, true)
         case .server(let line):
@@ -428,5 +723,16 @@ struct FocusSplatLegend: View {
     /// 1052472 -> "1.05M".
     static func millions(_ count: Int) -> String {
         String(format: "%.2fM", Double(count) / 1_000_000)
+    }
+
+    /// "Nov 2".
+    static func shortDate(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// "Nov 2 · 13 days ago": the age is what makes a splat laid over the space as it is now worth
+    /// looking at.
+    static func dateLine(_ date: Date) -> String {
+        shortDate(date) + " · " + date.formatted(.relative(presentation: .named))
     }
 }

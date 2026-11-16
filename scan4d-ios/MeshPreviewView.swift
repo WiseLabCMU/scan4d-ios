@@ -67,6 +67,10 @@ struct MeshPreviewContainer: View {
     @State private var focusMode: FocusOverlayMode = .splats
     /// The room scan the viewer opened on, found by its folder.
     @State private var openedScanId: UUID?
+    /// AR (FocusSplatAR), drawn over the preview, which keeps its own state underneath. The overlay
+    /// is AR's: the preview's selection and decoded splats go in, and come back on close.
+    @State private var arRequest: FocusARRequest?
+    @State private var arOverlay: FocusSplatOverlay?
 
     /// The focus scans made against the generation on screen.
     private var focusScans: [PreviewFocusScan] {
@@ -80,7 +84,29 @@ struct MeshPreviewContainer: View {
             let key = ScanLayers.key(scan.id, ScanLayer.splat)
             return "\(scan.id):\(layers.local[key]?.version ?? "-"):\(layers.layer(scan.id, kind: ScanLayer.splat)?.version ?? "-")"
         }
-        return "\(focusMode)|\(isMeshLoaded)|\(visibleIndex)|\(timelineState.readyIDs.count)|" + copies.joined(separator: ",")
+        return "\(focusMode)|\(isMeshLoaded)|\(visibleIndex)|\(timelineState.readyIDs.count)|\(arOverlay == nil)|"
+            + copies.joined(separator: ",")
+    }
+
+    /// Hands the preview's splats to AR: they leave this scene, so they are not drawn twice.
+    private func openAR() {
+        guard let request = FocusARRequest.make(location: location) else { return }
+        let overlay = FocusSplatOverlay()
+        overlay.selection = focusOverlay.selection
+        overlay.adopt(focusOverlay.decodedSplats())
+        focusOverlay.tearDown()
+        arRequest = request
+        arOverlay = overlay
+    }
+
+    /// Back from AR with what it showed; the preview re-syncs once `arOverlay` is gone.
+    private func closeAR() {
+        if let overlay = arOverlay {
+            focusOverlay.selection = overlay.selection
+            focusOverlay.adopt(overlay.decodedSplats())
+        }
+        arOverlay = nil
+        arRequest = nil
     }
 
     // MARK: Time scrubber (multi-generation timeline — see MeshPreviewView+Timeline)
@@ -425,6 +451,17 @@ struct MeshPreviewContainer: View {
                     .accessibilityLabel(focusMode.accessibilityLabel)
                 }
             }
+            if FocusARRequest.isAvailable(in: location) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    // The space's focus splats over the camera, in place.
+                    Button {
+                        openAR()
+                    } label: {
+                        Image(systemName: "arkit")
+                    }
+                    .accessibilityLabel("View focus splats in AR")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Pinch zoom-out is capped by the default camera controller; this steps
                 // the camera back 40% per tap so tall marker spheres etc. stay reachable.
@@ -455,8 +492,17 @@ struct MeshPreviewContainer: View {
             Text("Save the current view angle as this location's default preview pose, then regenerate every scan's thumbnail from this viewpoint.")
         }
         .task(id: focusSyncKey) {
+            // While AR is open its overlay has the splats.
+            guard arOverlay == nil else { return }
             focusOverlay.sync(view: sceneBox.view, scans: focusScans, mode: focusMode)
         }
+        .overlay {
+            if let arRequest, let arOverlay {
+                FocusSplatARView(request: arRequest, overlay: arOverlay, close: closeAR)
+                    .ignoresSafeArea()
+            }
+        }
+        .toolbar(arOverlay != nil ? .hidden : .automatic, for: .navigationBar)
         // The focus scans' copies on this phone: their cards may never have been on screen.
         .task(id: focusScans.map(\.id)) {
             for scan in focusScans {

@@ -60,6 +60,7 @@ struct FocusSplatPane: View {
     @State private var opening = false
     @State private var failure: String?
     @State private var showBox = true
+    @State private var ar: FocusARPresentation?
 
     var body: some View {
         let layers = ScanLayers.shared
@@ -83,6 +84,20 @@ struct FocusSplatPane: View {
         }
         .navigationTitle(scan.name)
         .task(id: local?.version) { await open(local) }
+        .fullScreenCover(item: $ar) { presentation in
+            FocusSplatARView(request: presentation.request, overlay: presentation.overlay, close: { ar = nil })
+        }
+    }
+
+    /// AR over the space, with this splat asked for first and its decoded copy handed over.
+    private func openAR() {
+        guard let request = FocusARRequest.make(location: scan.location) else { return }
+        let overlay = FocusSplatOverlay()
+        overlay.selection = FocusSplatOverlay.Selection(askedFor: [scan.id])
+        if let cloud, let cloudVersion {
+            overlay.adopt([scan.id: FocusSplatOverlay.Decoded(version: cloudVersion, cloud: cloud)])
+        }
+        ar = FocusARPresentation(request: request, overlay: overlay)
     }
 
     private func status(local: ScanLayer?) -> some View {
@@ -99,6 +114,16 @@ struct FocusSplatPane: View {
                 HStack(spacing: 8) {
                     Text(SplatScene.summary(count: cloud.count, version: local.version))
                     Spacer()
+                    if FocusARRequest.isAvailable(in: scan.location) {
+                        Button {
+                            openAR()
+                        } label: {
+                            Label("AR", systemImage: "arkit")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.cyan)
+                        .accessibilityLabel("View in AR")
+                    }
                     if scan.focusRegion != nil {
                         Button {
                             showBox.toggle()
