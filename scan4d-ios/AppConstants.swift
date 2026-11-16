@@ -698,6 +698,9 @@ enum AppConstants {
     static let focusPhotoPagerMaxPixel: CGFloat = 2048         // full-screen still, downsampled to about screen size
     static let focusStillUprightAspect: CGFloat = 0.75         // a 4:3 still held upright (portrait)
     static let focusCardInsetSize: CGFloat = 64                // the room scan's preview in a focus scan's card
+    // Focus splats in the room's 3D preview (REQ-041)
+    static let splatPreviewBudget = 3_000_000                  // Gaussians drawn at once; about two focus splats. To measure on device
+    static let splatPreviewMaxCuts = 8                         // focus boxes the mesh can be cut by at once (one shader argument each)
     // Focus region editor (draw the box on a room scan's mesh)
     static let focusRegionObjectMarginM: Float = 0.1           // a RoomPlan object's box grows by this on each side...
     static let focusRegionObjectHeadroomM: Float = 0.4         // ...and this upward, for what sits on it (tools on a table)

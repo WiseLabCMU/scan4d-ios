@@ -89,7 +89,10 @@ struct UserGuideView: View {
                               "alerts once), and Open takes you to the region in the editor. " +
                               "When the server makes a splat (a photo-real 3D model) of a focus scan, the " +
                               "scan's card says so: tap Download. Tapping the card then opens the splat in " +
-                              "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills."
+                              "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills. " +
+                              "The room's mesh preview shows the focus scans made in it: the scope button " +
+                              "steps through off, their boxes, and their boxes with splats drawn in place " +
+                              "of the mesh. Tap a focus scan in the legend to show, hide or download its splat."
                     )
                     guideRow(
                         icon: "6.circle.fill",

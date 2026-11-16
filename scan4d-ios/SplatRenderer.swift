@@ -1,5 +1,5 @@
 import Foundation
-import Metal
+@preconcurrency import Metal
 import os
 import SceneKit
 import simd
@@ -266,16 +266,18 @@ nonisolated final class SplatPipelines: @unchecked Sendable {
     private var depths: [MTLCompareFunction: MTLDepthStencilState] = [:]
 
     private init() {
-        device = SplatMetal.device
-        queue = device?.makeCommandQueue()
-        library = device?.makeDefaultLibrary()
+        let device = SplatMetal.device
+        let library = device?.makeDefaultLibrary()
         func compute(_ name: String) -> MTLComputePipelineState? {
             guard let device, let function = library?.makeFunction(name: name) else { return nil }
             return try? device.makeComputePipelineState(function: function)
         }
-        sortKeys = compute("splatSortKeys")
-        sortOffsets = compute("splatSortOffsets")
-        sortScatter = compute("splatSortScatter")
+        self.device = device
+        self.queue = device?.makeCommandQueue()
+        self.library = library
+        self.sortKeys = compute("splatSortKeys")
+        self.sortOffsets = compute("splatSortOffsets")
+        self.sortScatter = compute("splatSortScatter")
     }
 
     func render(_ formats: Formats) -> MTLRenderPipelineState? {

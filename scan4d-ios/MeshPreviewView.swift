@@ -61,6 +61,28 @@ struct MeshPreviewContainer: View {
     @State private var canonicalFrame: (center: SIMD3<Float>, span: Float)?
     @Environment(\.modelContext) private var modelContext
 
+    // MARK: Focus splats (REQ-041 — see MeshPreviewView+FocusSplats)
+
+    @State private var focusOverlay = FocusSplatOverlay()
+    @State private var focusMode: FocusOverlayMode = .splats
+    /// The room scan the viewer opened on, found by its folder.
+    @State private var openedScanId: UUID?
+
+    /// The focus scans made against the generation on screen.
+    private var focusScans: [PreviewFocusScan] {
+        PreviewFocusScan.made(against: isTimelineActive ? visibleScan?.id : openedScanId, in: location)
+    }
+
+    /// Everything the scene's focus boxes and splats follow; a change re-syncs them.
+    private var focusSyncKey: String {
+        let layers = ScanLayers.shared
+        let copies = focusScans.map { scan in
+            let key = ScanLayers.key(scan.id, ScanLayer.splat)
+            return "\(scan.id):\(layers.local[key]?.version ?? "-"):\(layers.layer(scan.id, kind: ScanLayer.splat)?.version ?? "-")"
+        }
+        return "\(focusMode)|\(isMeshLoaded)|\(visibleIndex)|\(timelineState.readyIDs.count)|" + copies.joined(separator: ",")
+    }
+
     // MARK: Time scrubber (multi-generation timeline — see MeshPreviewView+Timeline)
 
     /// The location's generations, oldest first. Resolved once on appear (main actor — SwiftData).
@@ -194,11 +216,12 @@ struct MeshPreviewContainer: View {
                 let visibleHasEquirects = isTimelineActive ? timelineState.visibleHasEquirects : hasEquirects
                 let showStillsLegend = keyframeMarkerMode.showStills && visibleHasKeyframes
                 let showEquirectLegend = keyframeMarkerMode.showEquirectFaces && visibleHasEquirects
+                let shownFocusScans: [PreviewFocusScan] = focusMode == .off ? [] : focusScans
                 // The legend's own gates never look at `hiddenLabels`: filtering everything out
                 // must still leave every row (dimmed) and the mode toggles on screen, or there
                 // would be no way back to the geometry.
                 if showSemanticLegend || showPrivacyLegend || showStillsLegend
-                    || showEquirectLegend || tappedLabel != nil {
+                    || showEquirectLegend || tappedLabel != nil || !shownFocusScans.isEmpty {
                     let metrics = SemanticLegendMetrics.forSizeClass(sizeClass)
                     VStack(alignment: .leading, spacing: metrics.stackSpacing) {
                         if let tapped = tappedLabel {
@@ -247,6 +270,9 @@ struct MeshPreviewContainer: View {
                         }
                         if showEquirectLegend {
                             equirectLegendRow
+                        }
+                        if !shownFocusScans.isEmpty {
+                            FocusSplatLegend(scans: shownFocusScans, overlay: focusOverlay, mode: focusMode)
                         }
                     }
                     .padding(metrics.cardPadding)
@@ -387,6 +413,18 @@ struct MeshPreviewContainer: View {
                     .accessibilityLabel(meshSourceMode.accessibilityLabel)
                 }
             }
+            if !focusScans.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    // Off, the focus boxes, or the boxes with their splats in place of the mesh.
+                    Button {
+                        focusMode = focusMode.next
+                    } label: {
+                        Image(systemName: focusMode.iconName)
+                            .foregroundColor(focusMode == .off ? .gray : .yellow)
+                    }
+                    .accessibilityLabel(focusMode.accessibilityLabel)
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Pinch zoom-out is capped by the default camera controller; this steps
                 // the camera back 40% per tap so tall marker spheres etc. stay reachable.
@@ -416,9 +454,21 @@ struct MeshPreviewContainer: View {
         } message: {
             Text("Save the current view angle as this location's default preview pose, then regenerate every scan's thumbnail from this viewpoint.")
         }
+        .task(id: focusSyncKey) {
+            focusOverlay.sync(view: sceneBox.view, scans: focusScans, mode: focusMode)
+        }
+        // The focus scans' copies on this phone: their cards may never have been on screen.
+        .task(id: focusScans.map(\.id)) {
+            for scan in focusScans {
+                await ScanLayers.shared.readLocal(scanId: scan.id, scanDirectory: scan.scanDirectory)
+            }
+        }
         .onAppear {
             // A re-presented viewer must never inherit the previous dismissal's cancellation.
             timelineState.isCancelled = false
+            openedScanId = location?.roomScans.first(where: {
+                $0.scanDirectory.standardizedFileURL == scanDirectoryURL?.standardizedFileURL
+            })?.id
             // Defer the heavy OBJ parsing to ensure the fullScreenCover animation completes smoothly
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 // Resolve the location's canonical frame from its ORIGINAL (earliest) scan before
@@ -465,6 +515,7 @@ struct MeshPreviewContainer: View {
             // would end it — it would keep parsing the rest of the location's meshes and writing
             // into state this view no longer owns.
             timelineState.isCancelled = true
+            focusOverlay.tearDown()
         }
     }
 

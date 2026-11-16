@@ -267,7 +267,7 @@ nonisolated enum WebPPixels {
         guard let format = vImage_CGImageFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorSpace: space,
                                                 bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue))
         else { throw SOGReader.Failure.notSOG("an image in an unexpected format") }
-        var buffer = try vImage_Buffer(cgImage: image, format: format)
+        let buffer = try vImage_Buffer(cgImage: image, format: format)
         defer { buffer.free() }
         let width = Int(buffer.width), height = Int(buffer.height)
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
