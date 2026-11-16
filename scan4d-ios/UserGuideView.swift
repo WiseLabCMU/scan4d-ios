@@ -86,7 +86,10 @@ struct UserGuideView: View {
                               "A region file from another tool can be imported from the same menu. " +
                               "With a Scan4D server set, it can also ask for a focus scan: the " +
                               "request waits in the To do list on the Dashboard, even offline (an urgent one also " +
-                              "alerts once), and Open takes you to the region in the editor."
+                              "alerts once), and Open takes you to the region in the editor. " +
+                              "When the server makes a splat (a photo-real 3D model) of a focus scan, the " +
+                              "scan's card says so: tap Download. Tapping the card then opens the splat in " +
+                              "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills."
                     )
                     guideRow(
                         icon: "6.circle.fill",

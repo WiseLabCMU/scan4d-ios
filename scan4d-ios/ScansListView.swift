@@ -912,9 +912,9 @@ struct ScanCard: View {
     @State private var exportPhase: ExportPhase?
     /// DECISION 3 hard gate: Share requires this scan post-processed.
     @State private var showPostprocessAlert = false
-    /// Focus scans: the photo viewer (in place of the mesh preview), and the room scan the
-    /// capture relocalized into, shown small beside the photo.
-    @State private var showFocusPhotos = false
+    /// Focus scans: the focus viewer (its splat and photos, in place of the mesh preview), and the
+    /// room scan the capture relocalized into, shown small beside the photo.
+    @State private var showFocusViewer = false
     @State private var parentPreviewImage: UIImage?
 
     /// Effective coloring progress: single-card @State, or the parent's bulk message.
@@ -1118,7 +1118,7 @@ struct ScanCard: View {
 
     @ViewBuilder
     private var previewImageSection: some View {
-        Button(action: { if scan.isFocusScan { showFocusPhotos = true } else { showMeshPreview = true } }) {
+        Button(action: { if scan.isFocusScan { showFocusViewer = true } else { showMeshPreview = true } }) {
             Group {
                 if let image = previewImage {
                     Image(uiImage: image)
@@ -1141,13 +1141,13 @@ struct ScanCard: View {
         .overlay(editingOverlay)
         .overlay(alignment: .topLeading) { warningsOverlay }
         .overlay(alignment: .bottomLeading) { focusScanOverlay }
-        .fullScreenCover(isPresented: $showFocusPhotos) {
+        .fullScreenCover(isPresented: $showFocusViewer) {
             NavigationView {
-                FocusScanPhotosView(scan: scan)
+                FocusScanView(scan: scan)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarLeading) {
-                            Button("Done") { showFocusPhotos = false }
+                            Button("Done") { showFocusViewer = false }
                         }
                     }
             }
