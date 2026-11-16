@@ -935,10 +935,11 @@ struct CaptureView: View {
             Text("The ghost mesh from your previous scan may not be perfectly aligned. Choose an option:")
         }
         .preferredColorScheme(.dark)
-        // Focus scan: the HUD, Check's auto-finish, the stop on a frame loss, and the region box.
-        // All in CaptureView+StillCapture (the stop's completion files the scan).
+        // Focus scan: the HUD, the target (Check's auto-finish, the others' soft limit), the stop
+        // on a frame loss, and the region box. All in CaptureView+StillCapture (the stop's
+        // completion files the scan).
         .overlay { stillCaptureOverlay }
-        .onChange(of: stillCapture.stats.stillsSaved) { _, saved in finishFocusScanIfTargetReached(saved) }
+        .onChange(of: stillCapture.stats.stillsSaved) { previous, saved in handleFocusTarget(from: previous, to: saved) }
         .onChange(of: stillCapture.stats.frameLost) { _, reason in handleFocusFrameLost(reason) }
         .onChange(of: scanStore.activeFocusRequest) { _, _ in refreshFocusBoxPlacement() }
         .onAppear {

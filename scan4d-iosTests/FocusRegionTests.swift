@@ -11,10 +11,10 @@ final class FocusRegionTests: XCTestCase {
         let region = FocusRegion(center: SIMD3(1, 0.8, -2), yaw: 0.5, size: SIMD3(1.2, 0.6, 0.8),
                                  label: "work table", source: .roomplan, detail: .detail,
                                  locationId: UUID(), frameScanId: UUID(), frameIsCanonical: true,
-                                 createdAtMs: 1_761_200_000_000)
+                                 createdAtMs: 1_761_200_000_000, regionId: UUID())
         let data = try XCTUnwrap(region.encoded())
         let json = try XCTUnwrap(String(data: data, encoding: .utf8))
-        for key in ["center_m", "yaw_rad", "size_m", "detail_level", "frame_is_canonical", "created_at_ms"] {
+        for key in ["center_m", "yaw_rad", "size_m", "detail_level", "frame_is_canonical", "created_at_ms", "region_id"] {
             XCTAssertTrue(json.contains("\"\(key)\""), "missing \(key) in \(json)")
         }
         XCTAssertTrue(json.contains("\"roomplan\""))
@@ -29,6 +29,7 @@ final class FocusRegionTests: XCTestCase {
         XCTAssertEqual(region.detail, .check)
         XCTAssertEqual(region.source, .imported)
         XCTAssertTrue(region.frameIsCanonical)
+        XCTAssertNil(region.regionId, "a first scan of a region carries no region id")
         XCTAssertEqual(region.label, "bench")
         XCTAssertNil(FocusRegion.decode(Data(#"{"center_m":[0,0,0]}"#.utf8)), "a box needs a size")
     }
@@ -89,5 +90,32 @@ final class FocusRegionTests: XCTestCase {
         }
         XCTAssertTrue(FocusDetailLevel.check.finishesAtTarget)
         XCTAssertFalse(FocusDetailLevel.splat.finishesAtTarget)
+        XCTAssertTrue(FocusDetailLevel.check.waitsForSpacing)
+        XCTAssertTrue(FocusDetailLevel.detail.waitsForSpacing)
+        XCTAssertFalse(FocusDetailLevel.splat.waitsForSpacing, "Splat also takes repeats between new angles")
+    }
+
+    func testRescanKeepsTheBoxAndKeysTheRegion() {
+        let firstScan = UUID(), mapScan = UUID()
+        let drawn = FocusRegion(center: SIMD3(1, 0.8, -2), yaw: 0.4, size: SIMD3(1.2, 0.6, 0.8), label: "work table",
+                                source: .roomplan, detail: .check, locationId: UUID(), frameScanId: mapScan,
+                                frameIsCanonical: true, createdAtMs: 1_761_200_000_000, taskId: UUID())
+        let rescan = drawn.forRescan(ofScan: firstScan, detail: .splat)
+        // The same box in the same frame: the new scan lines up with the first.
+        XCTAssertEqual(rescan.center, drawn.center)
+        XCTAssertEqual(rescan.yaw, drawn.yaw)
+        XCTAssertEqual(rescan.size, drawn.size)
+        XCTAssertEqual(rescan.frameScanId, drawn.frameScanId)
+        XCTAssertEqual(rescan.frameIsCanonical, drawn.frameIsCanonical)
+        XCTAssertEqual(rescan.locationId, drawn.locationId)
+        XCTAssertEqual(rescan.label, drawn.label)
+        XCTAssertEqual(rescan.placement(inRawFrameOf: mapScan, appliedRegistration: nil),
+                       drawn.placement(inRawFrameOf: mapScan, appliedRegistration: nil))
+        // At the level asked for now, keyed by the first scan, and not answering the old task again.
+        XCTAssertEqual(rescan.detail, .splat)
+        XCTAssertEqual(rescan.regionId, firstScan)
+        XCTAssertNil(rescan.taskId)
+        // A rescan of the rescan keeps the first scan's key.
+        XCTAssertEqual(rescan.forRescan(ofScan: UUID(), detail: .detail).regionId, firstScan)
     }
 }

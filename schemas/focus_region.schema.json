@@ -44,7 +44,12 @@
     "detail_level": {
       "type": "string",
       "enum": ["check", "detail", "splat"],
-      "description": "How much to capture: check (about 5 photos, finishes by itself), detail (about 30), splat (150 or more, for reconstruction). Default check."
+      "description": "How much to capture: check (about 5 photos, finishes by itself), detail (about 30), splat (about 150, including repeats between new angles, for reconstruction). Detail and splat run until the operator stops; their count is a soft limit. Default check."
+    },
+    "region_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The area this box covers across time. Absent on the first focus scan of a region, whose own scan id stands in for it; a rescan of that region (Rescan on its card) carries that scan's id, with the same box in the same frame. So every focus scan of one area shares one key: region_id if present, else the scan's id. Optional; on import, kept unless the box is redrawn."
     },
     "frame_scan_id": {
       "type": "string",

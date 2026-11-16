@@ -191,6 +191,22 @@ nonisolated enum ARStillCaptureGates {
         return nil
     }
 
+    /// `reason` of a still taken without a new angle (a focus level that does not wait for spacing).
+    static let repeatReason = "repeat"
+
+    /// Whether to take a still, and whether it is a new angle. `spaced` is `spacingDecision`'s
+    /// verdict. A capture that waits for spacing takes a still only on a new angle. One that does
+    /// not (focus Splat) also takes repeats, at most one per `repeatMinInterval` since the last
+    /// still of either kind, so they fill only the slow stretches and pauses; a new angle is never
+    /// held by that floor (a brisk orbit moves 5 degrees in well under a second). Only new angles
+    /// fill the coverage dial and anchor the next spacing. nil = hold.
+    static func stillVerdict(spaced: String?, waitsForSpacing: Bool, sinceLast: Double,
+                             repeatMinInterval: Double) -> (reason: String, newAngle: Bool)? {
+        if let spaced { return (spaced, true) }
+        guard !waitsForSpacing, sinceLast >= repeatMinInterval else { return nil }
+        return (repeatReason, false)
+    }
+
     // MARK: Focus region
 
     /// How a focus scan's region sits in one camera view.

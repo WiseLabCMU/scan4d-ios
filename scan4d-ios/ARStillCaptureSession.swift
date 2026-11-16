@@ -25,8 +25,9 @@ import simd
 ///     here, on a dedicated queue, with a bounded backlog.
 ///   - **Gates** (`ARStillCaptureGates`), per tracked frame: predicted image motion, the larger of
 ///     a pose term (rotation and sideways translation over the near scene depth) and the gyro's
-///     recent peak rate; viewpoint spacing as rotation or parallax since the previous still. Each
-///     still is then checked against the gyro rate at its own timestamp, and logged.
+///     recent peak rate; viewpoint spacing as rotation or parallax since the previous new angle
+///     (focus Splat does not wait for it: spacing only marks its new angles). Each still is then
+///     checked against the gyro rate at its own timestamp, and logged.
 ///   - **Exposure cap**: `arStillMaxExposureSeconds` on ARKit's own camera via
 ///     `configurableCaptureDeviceForPrimaryCamera`; auto exposure keeps metering and raises ISO.
 ///   - **Logs**: every stream frame's pose; stream depth + confidence at a capped rate; raw gyro
@@ -74,6 +75,11 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
         var shortExposureISOCeiling = 0.0
         var shortExposureFloorSeconds = 0.0
         var viewpointThresholdDeg = 0.0
+        /// false (focus Splat): stills also fire without a new angle ("repeat" in photos.csv), at
+        /// most one per `repeatMinIntervalSeconds`, and `viewpointThresholdDeg` only marks the new
+        /// angles, which that floor never holds.
+        var stillsWaitForSpacing = true
+        var repeatMinIntervalSeconds = 0.0
         var stillMinIntervalSeconds = 0.0
         var stillMaxIntervalSeconds = 0.0
         var gateDepthPercentile = 0.0
@@ -160,7 +166,8 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
         var rotationSinceStillDeg = 0.0
         var parallaxSinceStillDeg = 0.0
         /// Focus scan. `hold` is why the last frame did not take a still (for the capture HUD);
-        /// `coverageCounts` counts saved stills per coverage-dial cell (rings x sectors).
+        /// `coverageCounts` counts saved new-angle stills per coverage-dial cell (rings x sectors),
+        /// and `newAnglesSaved` all of them. Every still is a new angle except Splat's repeats.
         var hasRegion = false
         var detailLevel: FocusDetailLevel?
         var targetStills = 0
@@ -173,6 +180,7 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
         var hold: Hold = .none
         var heldRegionFrames = 0
         var coverageCounts: [Int] = []
+        var newAnglesSaved = 0
         var framesLogged = 0
         var gyroSamples = 0
         var accelSamples = 0
@@ -272,6 +280,7 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
 
     // Delegate-queue-owned (reset by `begin` while not recording).
     private var poseHistory: [(t: TimeInterval, m: simd_float4x4)] = []
+    /// The spacing anchor: the pose of the last new-angle still (a Splat repeat does not move it).
     private var lastStillTransform: simd_float4x4?
     private var lastStillTime: TimeInterval = -1
     private var frameIndex = 0
@@ -332,7 +341,12 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
         s.privacyFilter = context.privacyFilter
         if let level = context.region?.detail {
             s.viewpointThresholdDeg = level.spacingDeg
-            s.stillMaxIntervalSeconds = 0   // a focus scan fires on view changes only
+            s.stillsWaitForSpacing = level.waitsForSpacing
+            if !level.waitsForSpacing {
+                s.repeatMinIntervalSeconds = max(AppConstants.arStillMinIntervalSeconds,
+                                                 AppConstants.focusSplatRepeatMinIntervalSeconds)
+            }
+            s.stillMaxIntervalSeconds = 0   // no time trigger: new angles come from view changes only
         }
         if let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera {
             s.deviceSupportedPhotoDimensions = device.activeFormat.supportedMaxPhotoDimensions
@@ -704,18 +718,24 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
                 return
             }
         }
-        // A focus scan spaces by its detail level and fires on view changes only (a pause in
-        // front of the region takes one still, not one a second).
+        // A focus scan spaces by its detail level with no time trigger (a pause in front of the
+        // region is one new angle, not one a second). Check and Detail fire on new angles only;
+        // Splat fires on new angles at once and on repeats at most every
+        // `focusSplatRepeatMinIntervalSeconds`, so the spacing just marks its new angles.
         let sinceLast = lastStillTime < 0 ? Double.infinity : t - lastStillTime
-        guard let reason = ARStillCaptureGates.spacingDecision(
+        let spaced = ARStillCaptureGates.spacingDecision(
             sinceLast: sinceLast, rotationDeg: view.rotationDeg, parallaxDeg: view.parallaxDeg,
             minInterval: AppConstants.arStillMinIntervalSeconds,
             viewpointThresholdDeg: detail?.spacingDeg ?? AppConstants.arStillViewpointThresholdDeg,
-            maxInterval: detail == nil ? AppConstants.arStillMaxIntervalSeconds : 0
+            maxInterval: detail == nil ? AppConstants.arStillMaxIntervalSeconds : 0)
+        guard let verdict = ARStillCaptureGates.stillVerdict(
+            spaced: spaced, waitsForSpacing: detail?.waitsForSpacing ?? true, sinceLast: sinceLast,
+            repeatMinInterval: max(AppConstants.arStillMinIntervalSeconds, AppConstants.focusSplatRepeatMinIntervalSeconds)
         ) else {
             live.withLock { $0.heldSpacingFrames += 1; $0.hold = .sameView }
             return
         }
+        let reason = verdict.reason
         live.withLock { $0.hold = .none }
         var regionCell = -1
         if let regionView {
@@ -724,8 +744,9 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
                 azimuthBins: AppConstants.focusCoverageAzimuthBins,
                 elevationEdgesDeg: AppConstants.focusCoverageElevationEdgesDeg)
         }
-        // The pose of the frame that passed the gates anchors the spacing for the next still.
-        lastStillTransform = transform
+        // A new angle's pose anchors the spacing for the next one; a repeat leaves the anchor where
+        // it was, so the view has to move on from the last new angle, not from the last still.
+        if verdict.newAngle { lastStillTransform = transform }
         lastStillTime = t
         let request = StillRequest(hostTime: ProcessInfo.processInfo.systemUptime, reason: reason,
                                    angularRate: omega, lateralSpeed: lateral, gateDepth: gateDepth,
@@ -736,7 +757,8 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
                                    depthHeld: depthHeld,
                                    thermalState: Self.thermalName(ProcessInfo.processInfo.thermalState),
                                    poseSmear: poseSmear, gyroPeak: gyroPeak, gyroSmear: gyroSmear,
-                                   region: regionView, regionCell: regionCell, regionAimHits: aimHits)
+                                   region: regionView, regionCell: regionCell, regionAimHits: aimHits,
+                                   newAngle: verdict.newAngle)
         requestStill(request)
     }
 
@@ -767,6 +789,8 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
         var regionCell: Int
         /// Focus scan: LiDAR aim points inside the box (0-5), -1 when there was no depth to judge by.
         var regionAimHits: Int
+        /// The view moved on by the spacing (always, unless a Splat repeat): counts on the dial.
+        var newAngle: Bool
     }
 
     private func requestStill(_ request: StillRequest) {
@@ -865,9 +889,13 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
             let capturePx = captureSmear.map { $0 * Double(k[0][0]) }
             let wasOverBudget = overBudget == true
             let cell = request.regionCell
+            let newAngle = request.newAngle
             live.withLock {
                 $0.stillsSaved += 1
-                if cell >= 0, cell < $0.coverageCounts.count { $0.coverageCounts[cell] += 1 }
+                if newAngle {
+                    $0.newAnglesSaved += 1
+                    if cell >= 0, cell < $0.coverageCounts.count { $0.coverageCounts[cell] += 1 }
+                }
                 if hasDepth { $0.stillsWithDepth += 1 }
                 $0.lastStillDimensions = "\(width)x\(height)"
                 $0.lastLatencySeconds = latency
@@ -1098,6 +1126,7 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
                 "imu_accel.csv": "raw accelerometer g",
                 "world_map_registration.json": "copy of the world-map scan's registration.json (raw -> original scan's canonical frame), when it had one",
                 "photos.csv region_*": "focus scan: the region's share of the gating frame, camera distance, azimuth/elevation seen from the region (its own axes), coverage-dial cell; setup.regionToWorld places the box in this capture's world",
+                "photos.csv reason": "why the still fired: first, rotation, parallax (a new angle by the spacing), time, unspaced; repeat = focus Splat still with no new angle (setup.stillsWaitForSpacing false; at most one per setup.repeatMinIntervalSeconds after the previous still); rotation/parallax_since_prev are measured from the last new angle, interval_since_prev_s from the previous still",
                 "events.log": "capture lifecycle, exposure-cap changes, tracking and scene-depth changes, thermal changes, per-frame work timing at stop, failures"
             ]
         ]
@@ -1123,8 +1152,10 @@ nonisolated final class ARStillCaptureSession: @unchecked Sendable {
             "stills_over_budget_at_capture": stats.stillsOverBudgetAtCapture,
             "stills_capture_blur_unknown": stats.stillsCaptureBlurUnknown,
             "frames_held_region": stats.heldRegionFrames,
-            // Focus scan: saved stills per coverage-dial cell, ring-major (see region_cell in photos.csv).
+            // Focus scan: saved new-angle stills per coverage-dial cell, ring-major (see region_cell
+            // in photos.csv; a Splat repeat has a cell but is not counted here), and their total.
             "coverage_counts": stats.coverageCounts,
+            "stills_new_angle": stats.newAnglesSaved,
             "elapsed_seconds": stats.elapsedSeconds
         ]
         manifest["totals"] = totals

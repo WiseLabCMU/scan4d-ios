@@ -3,9 +3,12 @@ import simd
 
 // MARK: - Focus scan region and detail level (docs/design/capture-modes.md)
 
-/// How much a focus scan captures. Spacing is the view change between stills (turn or parallax at
-/// the region); the target is the still count the coverage display fills toward. Starting values,
-/// to tune from field captures.
+/// How much a focus scan captures. Spacing is the view change that makes a new angle (turn or
+/// parallax at the region); Check and Detail take a still only on a new angle, Splat also takes
+/// repeats in between (`waitsForSpacing`). The target is the photo count the HUD's bar fills
+/// toward, every photo counted: Check stops there by itself, Detail and Splat say there are
+/// enough and run on until the operator stops (a soft limit). Starting values, to tune from field
+/// captures.
 nonisolated enum FocusDetailLevel: String, Codable, CaseIterable, Identifiable, Sendable {
     case check
     case detail
@@ -55,6 +58,12 @@ nonisolated enum FocusDetailLevel: String, Codable, CaseIterable, Identifiable, 
 
     /// Check finishes by itself at the target; the others run until the user stops.
     var finishesAtTarget: Bool { self == .check }
+
+    /// Whether a still waits for the view to change by `spacingDeg`. Splat does not: a
+    /// reconstruction wants the overlap, so it also takes repeats between new angles, at most one
+    /// per `focusSplatRepeatMinIntervalSeconds`. Its spacing only marks which stills are new
+    /// angles: those fill the coverage dial.
+    var waitsForSpacing: Bool { self != .splat }
 }
 
 /// The box a focus scan captures: gravity-aligned (yaw about +Y only), centre and size in metres,
@@ -91,6 +100,10 @@ nonisolated struct FocusRegion: Codable, Equatable, Sendable {
     /// The control plane task that asked for this region (scan4d-server README, "Tasks"). Kept
     /// through the editor into the saved scan, so the scan's sync tells the server it is done.
     var taskId: UUID?
+    /// The area this box covers across time. nil on the first focus scan of a region, whose own
+    /// scan id stands in for it; a rescan of the region (`forRescan`) carries that id. So every
+    /// focus scan of one area shares one key: `regionId`, else the scan's id.
+    var regionId: UUID?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -105,12 +118,13 @@ nonisolated struct FocusRegion: Codable, Equatable, Sendable {
         case frameIsCanonical = "frame_is_canonical"
         case createdAtMs = "created_at_ms"
         case taskId = "task_id"
+        case regionId = "region_id"
     }
 
     init(center: SIMD3<Float>, yaw: Float = 0, size: SIMD3<Float>, label: String = "", source: Source = .user,
          detail: FocusDetailLevel = .check, locationId: UUID? = nil, frameScanId: UUID? = nil,
          frameIsCanonical: Bool = true, createdAtMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
-         taskId: UUID? = nil) {
+         taskId: UUID? = nil, regionId: UUID? = nil) {
         self.center = center
         self.yaw = yaw
         self.size = size
@@ -122,6 +136,7 @@ nonisolated struct FocusRegion: Codable, Equatable, Sendable {
         self.frameIsCanonical = frameIsCanonical
         self.createdAtMs = createdAtMs
         self.taskId = taskId
+        self.regionId = regionId
     }
 
     /// Lenient: only the box (centre, size) is required, so a hand-written or VLM-written file
@@ -141,6 +156,19 @@ nonisolated struct FocusRegion: Codable, Equatable, Sendable {
         createdAtMs = try c.decodeIfPresent(Int64.self, forKey: .createdAtMs)
             ?? Int64(Date().timeIntervalSince1970 * 1000)
         taskId = try c.decodeIfPresent(UUID.self, forKey: .taskId)
+        regionId = try c.decodeIfPresent(UUID.self, forKey: .regionId)
+    }
+
+    /// This region for a rescan of `scanId`, the focus scan that captured it: the same box in the
+    /// same frame, so the new scan's stills and box line up with that scan's (a splat of each sits
+    /// in one box frame), at the `detail` asked for now. Keyed by the same `regionId`, the first
+    /// scan's id when the region has none yet. No task: a task's region is answered once.
+    func forRescan(ofScan scanId: UUID, detail: FocusDetailLevel) -> FocusRegion {
+        var rescan = self
+        rescan.regionId = regionId ?? scanId
+        rescan.detail = detail
+        rescan.taskId = nil
+        return rescan
     }
 
     /// A usable box: finite, positive size no larger than `focusRegionMaxSizeM` on any side.

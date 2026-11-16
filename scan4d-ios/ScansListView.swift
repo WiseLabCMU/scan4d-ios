@@ -933,8 +933,11 @@ struct ScanCard: View {
     /// Export phase driven by the parent during a BULK share (nil otherwise).
     /// A single-card share uses the local `exportPhase` @State.
     var bulkExportPhase: ExportPhase?
+    /// Focus scans: photograph the same box again (the parent checks the space's gates and asks
+    /// for the level). Shown only on a focus scan with a region; nil hides it there too.
+    var onRescanRegion: (() -> Void)?
 
-    init(scan: CapturedScan, isLatest: Bool, isEditing: Bool, isSelected: Bool = false, bulkColoringMessage: String? = nil, bulkExportPhase: ExportPhase? = nil, onUpdate: @escaping (CapturedScan) -> Void, onSelect: (() -> Void)? = nil) {
+    init(scan: CapturedScan, isLatest: Bool, isEditing: Bool, isSelected: Bool = false, bulkColoringMessage: String? = nil, bulkExportPhase: ExportPhase? = nil, onUpdate: @escaping (CapturedScan) -> Void, onSelect: (() -> Void)? = nil, onRescanRegion: (() -> Void)? = nil) {
         self.scan = scan
         self.isLatest = isLatest
         self.isEditing = isEditing
@@ -943,6 +946,7 @@ struct ScanCard: View {
         self.bulkExportPhase = bulkExportPhase
         self.onUpdate = onUpdate
         self.onSelect = onSelect
+        self.onRescanRegion = onRescanRegion
     }
 
     var body: some View {
@@ -1374,7 +1378,12 @@ struct ScanCard: View {
             // deferred RoomBuilder often lands roomplan.json after auto-process ran,
             // leaving registration/proxy pending; that used to cost a mystery first
             // click). Manual re-runs live in the long-press menu for recovery cases.
-            // A focus scan has nothing to color or process.
+            // A focus scan has nothing to color or process; its second button rescans its box,
+            // so scans of one region over time line up.
+            if scan.isFocusScan, scan.focusRegion != nil, let onRescanRegion {
+                Button(action: onRescanRegion) { rescanRegionLabel }
+                    .disabled(isEditing)
+            }
             if !scan.isFocusScan {
                 let processDisabled = isEditing || activeColoringMessage != nil
                 Menu {
@@ -1401,6 +1410,17 @@ struct ScanCard: View {
             Text("You haven't post-processed this scan — do it now. Sharing it " +
                  "needs the processed room data (room model, registration, and rescan reference).")
         }
+    }
+
+    /// The Rescan button's face on a focus scan: the space's Rescan colour, the focus scope icon.
+    private var rescanRegionLabel: some View {
+        AdaptiveActionLabel(systemImage: "scope", title: "Rescan")
+        .font(.subheadline).bold()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(isEditing ? Color.gray.opacity(0.3) : Color.indigo.opacity(0.8))
+        .foregroundColor(isEditing ? .gray : .white)
+        .cornerRadius(10)
     }
 
     private func processButtonLabel(disabled: Bool) -> some View {
@@ -1668,6 +1688,22 @@ struct ShareSheet: UIViewControllerRepresentable {
         isLatest: true,
         isEditing: false,
         onUpdate: { _ in }
+    )
+    .padding()
+    .background(Color.black)
+}
+
+#Preview("ScanCard, focus scan") {
+    let focusScan = CapturedScan(name: "Focus 2", vertexCount: 0, faceCount: 0)
+    focusScan.scanKind = .focus
+    focusScan.stillCount = 212
+    focusScan.focusRegion = FocusRegion(center: .zero, size: SIMD3(1.2, 0.5, 0.8), label: "work table", detail: .splat)
+    return ScanCard(
+        scan: focusScan,
+        isLatest: true,
+        isEditing: false,
+        onUpdate: { _ in },
+        onRescanRegion: {}
     )
     .padding()
     .background(Color.black)

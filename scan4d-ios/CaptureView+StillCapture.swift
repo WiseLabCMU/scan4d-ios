@@ -140,13 +140,20 @@ extension CaptureView {
         stillCapture.stop(privacyFilter: isPrivacyFilterOn) { phase in handleStillCapturePhase(phase) }
     }
 
-    /// Check finishes by itself at its target; the other levels run until the operator stops.
-    func finishFocusScanIfTargetReached(_ saved: Int) {
+    /// At the target photo count: Check finishes by itself. For Detail and Splat it is a soft
+    /// limit: said once as the count crosses it (the HUD's bar turns green too), and the capture
+    /// runs on until the operator stops, so a missed side can still be filled.
+    func handleFocusTarget(from previous: Int, to saved: Int) {
         guard isStillCapturing, let level = scanStore.activeFocusRequest?.region.detail,
-              level.finishesAtTarget, saved >= level.targetStills else { return }
-        stopStillCapture()
-        showTransientMessage("Got \(saved) photos, saving", duration: 3,
-                             systemImage: "checkmark.circle.fill", tint: .green)
+              saved >= level.targetStills else { return }
+        if level.finishesAtTarget {
+            stopStillCapture()
+            showTransientMessage("Got \(saved) photos, saving", duration: 3,
+                                 systemImage: "checkmark.circle.fill", tint: .green)
+        } else if previous < level.targetStills {
+            showTransientMessage("\(level.targetStills) photos, enough for \(level.title). Tap stop when ready", duration: 4,
+                                 systemImage: "checkmark.circle.fill", tint: .green)
+        }
     }
 
     /// The engine finished (or failed): file the capture as a focus scan.

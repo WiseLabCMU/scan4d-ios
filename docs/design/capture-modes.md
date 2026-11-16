@@ -43,7 +43,8 @@ rescan does today, then diverge at Start.
    filtered during capture, the toggle stays live through a focus scan and its value at Stop counts.
 7. Regions are not catalogued yet. A focus scan carries its own region; scans of the same table
    are not grouped. Focus scans sit in the same list as room scans, marked partial, with a card
-   that shows the previous room scan's outline with the box and one photo.
+   that shows the previous room scan's outline with the box and one photo. (Revisited 2026-11-16:
+   a rescan of a region reuses its box and carries a shared `region_id`; see As built.)
 
 ## Shared foundation
 
@@ -88,7 +89,7 @@ at the seat left over (identity after a bake).
 |---|---|---|---|---|
 | Check | "which tools are on the table" | 25° | 5 stills | by itself at the target |
 | Detail | a close look | 12° | 30 stills | user stops |
-| Splat | reconstruction | 5° | 150 stills | user stops |
+| Splat | reconstruction | 5° (marks new angles; not a gate since 2026-11-16) | 150 stills (soft limit) | user stops |
 
 ### Result
 
@@ -153,6 +154,29 @@ focus capture with the region loaded. Delivery from the server (polling) waits f
   has one, its list gets a Room / Focus / All switch (`ScanListFilter`, remembered, Room by
   default). Select All and the bulk actions cover what is shown; a save that opens the space
   switches to its kind if the filter would hide it. The space tile reads "3 room · 2 focus".
+- **Splat does not wait for spacing** (2026-11-16). A reconstruction wants the overlap, and the 5°
+  spacing was dropping sharp frames it could use. Splat still fires at once on a new angle (the
+  spacing, measured from the last new angle) and, between them, takes repeats (`repeat` in
+  photos.csv) only after 1 s with no still of either kind. The floor is on repeats only: a still
+  comes back about 0.07 s after its request, so unfloored repeats ran several a second, while a
+  0.5 s floor on every still would have cut 46% of the new angles in the 2101 Focus 1 capture (5°
+  in under 0.5 s; median gap 0.50 s there, 1.50 s in ARENA Focus 3). Replaying both captures'
+  gaps, repeats would be at most 30% / 56% of the photos at a 1 s floor, 56% / 76% at 0.5 s (past
+  150 early), 12% / 27% at 2 s: 1 s fills slow stretches and pauses without swamping the new
+  angles. Only new angles fill the dial.
+  Check and Detail are unchanged. "Move to add angles" replaces "Capturing" while the stills are
+  repeats.
+- **Targets count photos and are a soft limit** (2026-11-16). Every photo counts, repeats included,
+  so the target bounds the dataset. A bar under the count fills toward it. Check stops there as
+  before; Detail and Splat turn the bar green, say once that there are enough, show "Enough photos,
+  tap stop when ready", and run on until Stop, so a missed side can still be filled.
+- **Rescan a region** (2026-11-16, revisits decision 7). A focus scan's card has Rescan: the same
+  box, at a level picked then, through the ordinary rescan entry against the latest room scan. The
+  region keeps its frame (`frame_is_canonical`, `frame_scan_id`), so its placement in the map's
+  raw frame is the earlier scan's, and a splat of each scan sits in the same box frame: time layers
+  of one area, aligned. Scans of one area share a key, `region_id` in `focus_region.json`: the
+  first scan's id, absent on that scan (its own id stands in), so regions captured before this
+  change group too. Still no catalogue: the app's list does not group them.
 - **Not done**: drag handles on the box; a catalogue of regions; server delivery of regions.
 
 ## Phases
