@@ -11,8 +11,9 @@ import UIKit
 // the latest room scan's world map, as Rescan Space does, and reads, decodes and draws no splat
 // until it has: relocalizing is work enough for a low-end phone. Then each splat goes in at its box
 // (the box in that scan's raw frame, `FocusRegion.placement`, as focus capture places it) times its
-// `to_box`. Only splats: the room mesh is too rough to lay over the room itself, and the point is a
-// past state of a region over the region as it is now.
+// `to_box`. No room mesh: it is too rough to lay over the room itself, and the point is a past
+// state of a region over the region as it is now. The room is there as Rescan Space's ghost
+// instead (`FocusARGhost`, the map scan's wireframe), which shows how well AR found the room.
 //
 // Its own ARSCNView and ARSession, never the capture's ARView (custom Metal in that RealityKit view
 // crashes on iOS 18, see Wireframe.metal), so the splats are drawn by the same SceneKit node
@@ -28,6 +29,16 @@ struct FocusARRequest {
     let registration: simd_float4x4?
     /// The space's focus scans with a splat, on the server or this phone, newest first.
     let scans: [PreviewFocusScan]
+    /// Where the map scan's ghost is read from; nil draws none.
+    var ghost: Ghost?
+
+    /// The files of a room scan's ghost (`GhostWireframe.readArtifacts`).
+    struct Ghost {
+        let scanId: UUID
+        let scanDirectory: URL
+        let proxyCandidates: [URL]
+        let meshURL: URL
+    }
 
     /// Whether `location` can open AR: a device with world tracking, a room scan with a map, and a
     /// focus scan with a splat. Cheap enough for a button's visibility.
@@ -45,7 +56,11 @@ struct FocusARRequest {
             mapScanName: map.name,
             worldMapURL: map.worldMapURL,
             registration: SaveRegistration.appliedTransform(scanDirectory: map.scanDirectory),
-            scans: PreviewFocusScan.all(in: location).filter { ScanLayers.shared.line(for: $0.id) != nil })
+            scans: PreviewFocusScan.all(in: location).filter { ScanLayers.shared.line(for: $0.id) != nil },
+            ghost: Ghost(scanId: map.id, scanDirectory: map.scanDirectory,
+                         proxyCandidates: [map.scanDirectory.appendingPathComponent("mesh_proxy.obj"),
+                                           map.rawDataPath.appendingPathComponent("mesh_proxy.obj")],
+                         meshURL: map.meshFileURL))
     }
 
     func stage(aligned: Bool) -> FocusSplatStage {
@@ -264,6 +279,78 @@ private nonisolated struct LoadedWorldMap: @unchecked Sendable {
     let map: ARWorldMap
 }
 
+/// The map scan's ghost in AR: Rescan Space's wireframe of the room (`GhostWireframe`), at identity
+/// in the session's world, which is the map scan's raw frame. It shows how well AR found the room,
+/// and gives the splats the room around them (the mesh itself is too rough to lay over the room).
+/// Like the splats, it is read and built only once AR first finds the space, off the main thread,
+/// and drawn only while AR is in the map's frame.
+@Observable
+@MainActor
+final class FocusARGhost {
+    enum State: Equatable {
+        case notLoaded
+        case loading
+        case ready
+        /// The map scan has no mesh to draw.
+        case missing
+    }
+
+    private(set) var state: State = .notLoaded
+    @ObservationIgnored private var node: SCNNode?
+    @ObservationIgnored private var closed = false
+
+    /// Reads and builds the ghost once, then adds it to `view`'s scene, hidden (`setVisible`).
+    func load(_ source: FocusARRequest.Ghost, into view: SCNView) async {
+        guard state == .notLoaded, !closed else { return }
+        state = .loading
+        let begun = CFAbsoluteTimeGetCurrent()
+        let built = await withCheckedContinuation { (continuation: CheckedContinuation<BuiltGhost, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                let artifacts = GhostWireframe.readArtifacts(
+                    scanDirectory: source.scanDirectory, proxyCandidates: source.proxyCandidates,
+                    meshFileURL: source.meshURL, withProxy: true, context: "splat AR", scanId: source.scanId)
+                guard let data = artifacts.data else {
+                    continuation.resume(returning: BuiltGhost(node: nil, isProxy: false))
+                    return
+                }
+                let outline = GhostWireframe.outlinePlanes(isProxy: artifacts.isProxy, planes: artifacts.planes,
+                                                           levelYs: artifacts.levelYs)
+                let parts = GhostWireframe.build(data: data, isProxy: artifacts.isProxy, outlinePlanes: outline)
+                continuation.resume(returning: BuiltGhost(node: GhostWireframe.sceneNode(parts), isProxy: artifacts.isProxy))
+            }
+        }
+        guard !closed else { return }
+        guard let node = built.node, let scene = view.scene else {
+            state = .missing
+            PerfDiag.log("[SplatAR] no room scan mesh to draw as the ghost")
+            return
+        }
+        node.isHidden = true
+        scene.rootNode.addChildNode(node)
+        self.node = node
+        state = .ready
+        PerfDiag.log(String(format: "[SplatAR] ghost (%@) built in %.1f s",
+                            built.isProxy ? "proxy" : "full mesh", CFAbsoluteTimeGetCurrent() - begun))
+    }
+
+    func setVisible(_ visible: Bool) {
+        node?.isHidden = !visible
+    }
+
+    /// The view is closing.
+    func tearDown() {
+        closed = true
+        node?.removeFromParentNode()
+        node = nil
+    }
+}
+
+/// A ghost built off the main thread, handed to the main actor (nothing in it is in a scene yet).
+private nonisolated struct BuiltGhost: @unchecked Sendable {
+    let node: SCNNode?
+    let isProxy: Bool
+}
+
 /// The camera, and the scene the splats are drawn in (ARKit's world, metres).
 struct FocusARSceneView: UIViewRepresentable {
     let session: FocusARSession
@@ -344,10 +431,11 @@ struct FocusARSceneView: UIViewRepresentable {
     }
 }
 
-/// AR: the space's focus splats over the camera. A status pill (Relocalizing, Aligned, Lost) with
-/// Try Again; a chip over each box, and a tap on a box or its row shows, hides or downloads its
-/// splat; a fade slider and a press-and-hold that hides the splats, to compare a past state with
-/// the space as it is now. The budget shrinks while the phone is hot.
+/// AR: the space's focus splats over the camera, with the room scan's ghost. A status pill
+/// (Relocalizing, Aligned, Lost) with Try Again; a chip over each box, and a tap on a box or its row
+/// shows, hides or downloads its splat; a fade slider and a press-and-hold that hides the splats, to
+/// compare a past state with the space as it is now; a Room button for the ghost. The budget shrinks
+/// while the phone is hot.
 struct FocusSplatARView: View {
     let request: FocusARRequest
     /// Owned by the presenter, which hands its selection and decoded splats in and takes them back.
@@ -355,6 +443,8 @@ struct FocusSplatARView: View {
     let close: () -> Void
 
     @State private var session = FocusARSession()
+    @State private var ghost = FocusARGhost()
+    @State private var showRoom = true
     @State private var fade: Double = 1
     @State private var holding = false
     @State private var showRegions = true
@@ -407,6 +497,12 @@ struct FocusSplatARView: View {
                 await ScanLayers.shared.readLocal(scanId: scan.id, scanDirectory: scan.scanDirectory)
             }
         }
+        // The ghost, like the splats, once AR has found the space.
+        .task(id: session.aligned) {
+            guard session.aligned, let source = request.ghost, let view = session.view else { return }
+            await ghost.load(source, into: view)
+        }
+        .onChange(of: ghostVisible, initial: true) { _, visible in ghost.setVisible(visible) }
         .task(id: session.status) {
             slowFind = false
             guard case .finding = session.status else { return }
@@ -433,6 +529,7 @@ struct FocusSplatARView: View {
             UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
             session.stop()
             overlay.tearDown()
+            ghost.tearDown()
         }
     }
 
@@ -504,8 +601,38 @@ struct FocusSplatARView: View {
         HStack(alignment: .bottom, spacing: 10) {
             regionsPanel
             Spacer(minLength: 0)
-            holdButton
+            VStack(spacing: 12) {
+                if request.ghost != nil, ghost.state != .missing {
+                    roomButton
+                }
+                holdButton
+            }
         }
+    }
+
+    /// The room scan's ghost: shown once loaded, while AR is in the map's frame, unless switched off.
+    private var ghostVisible: Bool {
+        session.aligned && showRoom && ghost.state == .ready
+    }
+
+    /// Shows or hides the room scan's ghost, the check on how well AR found the room.
+    private var roomButton: some View {
+        Button {
+            showRoom.toggle()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: showRoom ? "square.grid.3x3.fill" : "square.grid.3x3")
+                    .font(.title2)
+                    .frame(width: 56, height: 56)
+                    .background(.ultraThinMaterial, in: Circle())
+                Text("Room")
+                    .font(.caption2)
+            }
+            .foregroundColor(.white)
+        }
+        .accessibilityLabel(showRoom ? "Hide the room scan" : "Show the room scan")
+        .disabled(!session.aligned)
+        .opacity(session.aligned ? 1 : 0.4)
     }
 
     /// The regions, also those off screen or behind you, and the fade.
@@ -586,7 +713,8 @@ struct FocusSplatARView: View {
             return "\(scan.id):\(layers.local[key]?.version ?? "-"):"
                 + "\(layers.layer(scan.id, kind: ScanLayer.splat)?.version ?? "-"):\(Self.lineKey(layers.line(for: scan.id)))"
         }
-        return "\(session.aligned)|\(session.hasView)|" + rows.joined(separator: ",")
+        // The ghost's arrival re-syncs too: the overlay cuts it inside shown splats' boxes.
+        return "\(session.aligned)|\(session.hasView)|\(ghost.state)|" + rows.joined(separator: ",")
     }
 
     /// A splat line, with a download's progress in whole percent (the chips show it).

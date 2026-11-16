@@ -444,78 +444,22 @@ struct CaptureView: View {
     }
 
     /// Background half of `loadGhostMeshData` — file reads + de-registration + plane decode
-    /// (no SwiftData, no @State; everything arrives as plain values snapshotted on main).
+    /// (no SwiftData, no @State; everything arrives as plain values snapshotted on main). The
+    /// reading is `GhostWireframe.readArtifacts`, shared with AR's splat view.
     private static func readGhostArtifacts(activeScanCase: ScanCase, scanDirectory: URL,
                                            proxyCandidates: [URL], meshFileURL: URL, scanId: UUID)
         -> (data: Data?, isProxy: Bool, planes: [PlaneRegistration.Plane], levelYs: [Float]) {
-        // DECISION 2: rescans AND adjacent-connects load the light proxy (walls/floor/ceiling subtracted, RoomPlan
-        // quads baked in) instead of the full 10⁵–10⁶-face mesh — killing the 2× mesh-
-        // coexistence memory and most of the ghost render/parse cost. A proxy ghost also
-        // retires the mesh-ICP path for the session (plane auto-align drives the green chip;
-        // save-time registration is the correction authority) — the dense-ICP machinery only
-        // engages for legacy scans with no proxy artifact.
-        // A connect's pre-pinA phase is same-room (relocalized into the ghost's own room), so it
-        // takes the same proxy + plane path as a rescan.
+        // Rescans AND adjacent-connects load the proxy, its planes and its levels. A connect's
+        // pre-pinA phase is same-room (relocalized into the ghost's own room), so it takes the same
+        // proxy + plane path as a rescan: fitting live walls to the ghost seats it and corrects pinA
+        // into map A's frame at Confirm. The different-room false-lock risk is room B (a fresh
+        // session after the reset, no ghost), never this phase.
         let loadsGhost = activeScanCase == .rescanSpace || activeScanCase == .linkAdjacent
-        var ghostData: Data?
-        var isProxy = false
-        if loadsGhost {
-            for url in proxyCandidates {
-                if let data = try? Data(contentsOf: url) {
-                    ghostData = data
-                    isProxy = true
-                    print("[GhostProxy] \(activeScanCase == .linkAdjacent ? "adjacent-connect" : "rescan") ghost using proxy (\(data.count / 1024)KB)")
-                    break
-                }
-            }
-        }
-        if !isProxy {
-            ghostData = try? Data(contentsOf: meshFileURL)
-        }
-        // DECISION 1 co-framing: if this scan's mesh was registered into the canonical frame
-        // at ITS save, undo that here — the live session relocalizes into the scan's RAW
-        // capture frame (the world map can't be re-based), and the ghost must share it
-        // (visual overlay, manual nudge, and the ICP probe all assume ghost ≡ live frame).
-        // One O(n) text pass, only for scans that actually carry an applied registration.
-        if let data = ghostData,
-           let undo = SaveRegistration.inverseForGhost(scanDirectory: scanDirectory) {
-            ghostData = SaveRegistration.transformOBJ(data, by: undo)
-            print("[PlaneReg] ghost mesh de-registered back to its raw capture frame for relocalization overlay")
-        }
-        // Ghost auto-align reference: the ghost room's planes in the SAME raw frame as the
-        // (de-registered) mesh + world map. Enabled for rescan AND adjacent-connect: a connect's
-        // pre-pinA phase is same-room (relocalized into the ghost's own room), so fitting live walls
-        // to the ghost seats it and corrects pinA into map A's frame at Confirm. The different-room
-        // false-lock risk is room B (a fresh session after the reset, no ghost), never this phase.
-        let planes = loadsGhost ? SaveRegistration.rawFramePlanes(scanDirectory: scanDirectory) : []
-        if !planes.isEmpty {
-            print("[PlaneReg] ghost auto-align reference loaded: \(planes.count) planes")
-        } else if loadsGhost {
-            // Loud, not silent: without reference planes there is NO auto-align, NO plane
-            // detection, and no [PlaneReg] output at all — this line is the only breadcrumb.
-            print("[PlaneReg] auto-align DISABLED: no reference planes — roomplan.json missing/undecodable for scan \(scanId) (was a room built at its save?)")
-        }
-        // Derived LEVEL heights, for the renderer's outline set: the proxy builder replaced the
-        // RoomPlan floor quads these matched, so outlining those floors draws a rectangle around
-        // geometry the ghost no longer contains. The sidecar is co-framed with mesh.obj — canonical
-        // for a registered scan — so its heights go through the SAME raw-frame undo the reference
-        // planes take above (skipping it puts them in the wrong frame on exactly those scans).
-        var levelYs: [Float] = []
-        if loadsGhost, let derived = DerivedSurfacesData.load(scanDirectory: scanDirectory) {
-            let undo = SaveRegistration.inverseForGhost(scanDirectory: scanDirectory)
-            levelYs = derived.surfaces
-                .filter { $0.category == DerivedSurfacesData.levelCategory }
-                .compactMap { s in
-                    guard let p = PlaneRegistration.plane(category: "floor", width: s.dimensions.width,
-                                                          height: s.dimensions.height,
-                                                          transform: s.transform) else { return nil }
-                    return (undo.map { PlaneRegistration.applying($0, to: p) } ?? p).center.y
-                }
-            if !levelYs.isEmpty {
-                print("[GhostProxy] ghost derived levels for outline suppression: \(levelYs.count)")
-            }
-        }
-        return (ghostData, isProxy, planes, levelYs)
+        let read = GhostWireframe.readArtifacts(
+            scanDirectory: scanDirectory, proxyCandidates: proxyCandidates, meshFileURL: meshFileURL,
+            withProxy: loadsGhost, context: activeScanCase == .linkAdjacent ? "adjacent-connect" : "rescan",
+            scanId: scanId)
+        return (read.data, read.isProxy, read.planes, read.levelYs)
     }
 
     /// Computes the connector anchors for the active location (Track C). Only populated when

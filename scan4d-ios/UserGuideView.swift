@@ -97,7 +97,9 @@ struct UserGuideView: View {
                               "The AR button, in the mesh preview or beside a splat, lays the space's splats " +
                               "over the camera where they were captured: point at the space and move slowly " +
                               "until the pill says Aligned (Try Again if it says Lost); the splats load only " +
-                              "then. Each box's label gives " +
+                              "then. The room scan's ghost, as in Rescan, shows how well AR found the room: " +
+                              "its lines should sit on the walls and furniture (the Room button hides it). " +
+                              "Each box's label gives " +
                               "the scan's date and age; tap a box to show or hide its splat, and hold the eye " +
                               "button or lower the slider to see the space as it is now."
                     )

@@ -127,6 +127,21 @@ final class FocusSplatARTests: XCTestCase {
         overlay.tearDown()
     }
 
+    /// AR draws Rescan's ghost from the same lines, as SceneKit nodes named for the overlay's cut.
+    func testTheGhostBecomesSceneKitLines() {
+        let triangle = Data("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".utf8)
+        let parts = GhostWireframe.build(data: triangle, isProxy: false, outlinePlanes: [])
+        XCTAssertFalse(parts.mesh.isEmpty)
+        XCTAssertTrue(parts.outline.isEmpty)
+        let node = GhostWireframe.sceneNode(parts)
+        XCTAssertEqual(node?.childNodes.count, 1)
+        XCTAssertEqual(node?.childNodes.first?.name, GhostWireframe.sceneNodeName)
+        // Three edges, each a thin quad of four vertices.
+        XCTAssertEqual(node?.childNodes.first?.geometry?.sources(for: .vertex).first?.vectorCount, 12)
+        XCTAssertNil(GhostWireframe.sceneNode(GhostWireframe.Parts()))
+        XCTAssertTrue(GhostWireframe.outlinePlanes(isProxy: false, planes: [], levelYs: []).isEmpty)
+    }
+
     func testRowsSayWhatCanBeTapped() {
         XCTAssertFalse(FocusSplatLegend.look(.waiting, mode: .splats).tappable)
         XCTAssertTrue(FocusSplatLegend.look(.covered, mode: .splats).tappable)

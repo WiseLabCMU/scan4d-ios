@@ -433,8 +433,8 @@ final class FocusSplatOverlay {
                 updateChip(scan, state: FocusSplatLegend.live(next[scan.id], scanId: scan.id), on: box)
             }
         }
+        applyCut(in: scene, group: group, frames: frames)
         if !stage.isWorld {
-            applyCut(in: scene, group: group)
             // AR's view draws every camera frame anyway.
             view.rendersContinuously = !loaded.isEmpty
         }
@@ -571,10 +571,11 @@ final class FocusSplatOverlay {
         box.addChildNode(chip)
     }
 
-    // MARK: The cut (preview)
+    // MARK: The cut
 
-    /// Discards the mesh's fragments inside a shown splat's box. Each box is a matrix from the
-    /// scene's world into the box's unit cube; shader modifiers take no arrays, hence the names.
+    /// Discards the mesh's fragments inside a shown splat's box: the room mesh in the preview, the
+    /// room scan's ghost in AR. Each box is a matrix from the scene's world into the box's unit
+    /// cube; shader modifiers take no arrays, hence the names.
     static let cutModifier: String = {
         var source = "#pragma arguments\n"
         for index in 0..<AppConstants.splatPreviewMaxCuts { source += "float4x4 splatCut\(index);\n" }
@@ -587,12 +588,13 @@ final class FocusSplatOverlay {
         return source
     }()
 
-    private func applyCut(in scene: SCNScene, group: SCNNode) {
+    private func applyCut(in scene: SCNScene, group: SCNNode, frames: [UUID: simd_float4x4]) {
         let cuts: [simd_float4x4] = scans.compactMap { scan in
             guard loaded[scan.id] != nil else { return nil }
             let half = scan.region.halfExtents
             let scale = simd_float4x4(diagonal: SIMD4<Float>(half.x, half.y, half.z, 1))
-            return (group.simdWorldTransform * scan.region.transform * scale).inverse
+            let frame = frames[scan.id] ?? stage.boxFrame(scan.region)
+            return (group.simdWorldTransform * frame * scale).inverse
         }
         guard !cuts.isEmpty || cutInstalled else { return }
         cutInstalled = true
@@ -611,10 +613,11 @@ final class FocusSplatOverlay {
         }
     }
 
-    /// The room meshes: the opened scan's (full, proxy, dynamic) and each timeline generation's.
+    /// The room meshes: the opened scan's (full, proxy, dynamic) and each timeline generation's in
+    /// the preview, the ghost's in AR.
     private static func meshNodes(in scene: SCNScene) -> [SCNNode] {
         var nodes: [SCNNode] = []
-        for name in ["mesh", "proxyMesh", "dynamicMesh"] {
+        for name in ["mesh", "proxyMesh", "dynamicMesh", GhostWireframe.sceneNodeName] {
             nodes += scene.rootNode.childNodes(passingTest: { node, _ in node.name == name && node.geometry != nil })
         }
         for slot in scene.rootNode.childNodes(passingTest: { node, _ in node.name == "timelineSlot" }) {
