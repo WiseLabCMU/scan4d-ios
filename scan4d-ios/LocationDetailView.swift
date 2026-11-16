@@ -87,6 +87,8 @@ struct LocationDetailView: View {
     /// The region the editor's Scan returned; the focus scan starts once the editor has closed,
     /// so the rescan's suspect-map confirm presents over this view, not a dismissing cover.
     @State private var pendingFocusScan: FocusRegion?
+    /// A focus scan whose box its card's Rescan photographs again, while the level is picked.
+    @State private var focusScanToRescan: CapturedScan?
 
     /// Composed from four independently type-checked pieces — same surgery as
     /// CaptureView.body (#56): measured at **14,345 ms** to type-check, second only to
@@ -239,7 +241,9 @@ struct LocationDetailView: View {
                                         } else {
                                             selectedScans.insert(scan.id)
                                         }
-                                    }
+                                    },
+                                    // Shown on focus scans only (the card checks).
+                                    onRescanRegion: { requestRegionRescan(scan) }
                                 )
                                 .padding(.horizontal)
                             }
@@ -370,6 +374,21 @@ struct LocationDetailView: View {
         } message: {
             Text("A whole-room scan updates the room's mesh and photos. A focus scan photographs one region in detail (a partial scan).")
         }
+        // A focus scan card's Rescan: the same box again, at the level picked here.
+        .confirmationDialog("Rescan this region", isPresented: Binding(get: { focusScanToRescan != nil },
+                                                                      set: { if !$0 { focusScanToRescan = nil } }),
+                            titleVisibility: .visible, presenting: focusScanToRescan) { source in
+            if let region = source.focusRegion {
+                ForEach(FocusDetailLevel.allCases) { level in
+                    Button(level == region.detail ? level.title + " (as before)" : level.title) {
+                        rescanRegion(region.forRescan(ofScan: source.id, detail: level))
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { source in
+            Text("Photographs \(source.focusRegion?.displayName ?? "the region") again in the same box, so this scan lines up with the earlier ones.")
+        }
         .fileImporter(isPresented: $showRegionImporter, allowedContentTypes: [.json]) { result in
             importRegionFile(result)
         }
@@ -414,6 +433,23 @@ struct LocationDetailView: View {
         guard focusScanGatesAllow(latest) else { return }
         importedRegion = region
         showRegionEditor = true
+    }
+
+    /// A focus scan card's Rescan: the rescan's gates first, as for a drawn region, then the level.
+    /// The box comes back through the latest room scan's map like any region (`FocusRegion.placement`),
+    /// so it sits where the earlier scan's did, whichever room scan that one relocalized into.
+    private func requestRegionRescan(_ scan: CapturedScan) {
+        guard let latest = location.latestRoomScan else {
+            showNoWorldMapAlert = true
+            return
+        }
+        guard focusScanGatesAllow(latest) else { return }
+        focusScanToRescan = scan
+    }
+
+    private func rescanRegion(_ region: FocusRegion) {
+        guard let latest = location.latestRoomScan else { return }
+        startRescan(latest, focus: region)
     }
 
     /// The rescan's own gates (world map on disk, post-processing done), checked BEFORE a region

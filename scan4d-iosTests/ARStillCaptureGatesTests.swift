@@ -123,6 +123,25 @@ final class ARStillCaptureGatesTests: XCTestCase {
         XCTAssertNil(decide(0.2, 90, 90, min: 0.5), "below the floor nothing fires")
     }
 
+    func testStillVerdictSplatTakesRepeatsAndCountsOnlyNewAngles() {
+        func verdict(_ spaced: String?, waits: Bool, since: Double = 1.2, floor: Double = 1.0) -> (reason: String, newAngle: Bool)? {
+            ARStillCaptureGates.stillVerdict(spaced: spaced, waitsForSpacing: waits, sinceLast: since, repeatMinInterval: floor)
+        }
+        // Check and Detail: a still only on a new angle.
+        XCTAssertNil(verdict(nil, waits: true), "no new angle, no still")
+        XCTAssertEqual(verdict("rotation", waits: true)?.reason, "rotation")
+        XCTAssertEqual(verdict("rotation", waits: true)?.newAngle, true)
+        // Splat: a still either way; only the spaced one is a new angle.
+        XCTAssertEqual(verdict("parallax", waits: false)?.reason, "parallax")
+        XCTAssertEqual(verdict("parallax", waits: false)?.newAngle, true)
+        XCTAssertEqual(verdict("first", waits: false)?.newAngle, true)
+        XCTAssertEqual(verdict(nil, waits: false)?.reason, ARStillCaptureGates.repeatReason)
+        XCTAssertEqual(verdict(nil, waits: false)?.newAngle, false)
+        // Repeats wait out the floor since the previous still; a new angle does not.
+        XCTAssertNil(verdict(nil, waits: false, since: 0.6), "a repeat inside the floor is held")
+        XCTAssertEqual(verdict("rotation", waits: false, since: 0.2)?.newAngle, true, "a new angle is never held by the floor")
+    }
+
     func testGyroHistoryPeakAndRateAtTime() {
         var history = ARStillCaptureGates.GyroHistory(capacity: 4)
         XCTAssertNil(history.latest)

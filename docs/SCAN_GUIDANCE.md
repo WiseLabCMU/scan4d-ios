@@ -118,11 +118,15 @@ the region has been photographed from.
 |:-----|:-----------|:--------|
 | (before Start) | Relocalized, waiting for the record tap | "Line up on the box, then tap record" |
 | `none` / `saving` | A still was taken or is being saved | "Capturing" |
+| `none` / `saving`, Splat | The last still was a repeat: no new angle since the last one that was | "Capturing, move to add angles" |
+| `none` / `saving`, at the target | Detail or Splat has saved its target photo count (a soft limit; capture goes on) | "Enough photos, tap stop when ready" |
 | `tracking` | Tracking not normal | "Hold on, finding tracking" |
 | `motion` | Blur gate: the camera moves too fast for the exposure | "Hold steadier" |
 | `outOfView` | The LiDAR depth along the image centre and four inner rays misses the box (without depth: its centre is not in the frame, 10% margin) | "Point at the box" |
 | `tooFar` | The box fills less than `focusMinFrameCoverage` (4%) of the frame | "Move closer" |
-| `sameView` | The view of the box has not changed by the detail level's spacing | "Move to a new angle" |
+| `sameView` | Check and Detail: the view of the box has not changed by the detail level's spacing | "Move to a new angle" |
 
 Check (about 5 stills) finishes by itself at its target; Detail and Splat run until the operator
-stops.
+stops; their target is a soft limit, shown by a bar under the photo count. Splat never holds for
+spacing: between new angles it takes repeats, one after each second with no photo, and its dial counts only the
+stills that were a new angle.

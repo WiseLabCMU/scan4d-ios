@@ -652,12 +652,13 @@ enum AppConstants {
     static let roomStillFrameGapSeconds: TimeInterval = 0.3    // ARKit frame timestamps jumping more than this between 0.1 s capture ticks = a stall
 
     // ── Focus scan (docs/design/capture-modes.md) ── starting values per detail level, to tune from field captures
-    static let focusCheckSpacingDeg: Double = 25               // Check: next still once the view of the region changed this much (turn or parallax)
+    static let focusCheckSpacingDeg: Double = 25               // Check: next still once the view of the region changed this much (turn or parallax): a new angle
     static let focusDetailSpacingDeg: Double = 12
-    static let focusSplatSpacingDeg: Double = 5                // Splat: the AR Capture experiment ran 6 deg; the iPhone replay favoured 4
+    static let focusSplatSpacingDeg: Double = 5                // Splat: marks new angles only (it also takes repeats, FocusDetailLevel.waitsForSpacing); the AR Capture experiment ran 6 deg, the iPhone replay favoured 4
     static let focusCheckTargetStills: Int = 5                 // Check finishes by itself here ("which tools are on the table")
     static let focusDetailTargetStills: Int = 30
-    static let focusSplatTargetStills: Int = 150
+    static let focusSplatTargetStills: Int = 150               // a soft limit, every photo counted (repeats too): the HUD bar fills here and says enough; capture runs on until Stop
+    static let focusSplatRepeatMinIntervalSeconds: TimeInterval = 1.0 // Splat: a repeat (no new angle) only after this long with no still of either kind; a new angle is not held (46% of the 5-deg stills in the 2101 Focus 1 capture came under 0.5 s apart). Stills come back ~0.07 s after the request, so unfloored repeats ran several a second. Replayed over two Splat captures, 1 s adds repeats only in slow stretches: at most 30% / 56% of the photos (0.5 s: 56% / 76%, past 150 early)
     static let focusRegionMaxSizeM: Float = 10                 // a region larger than this on any side is rejected (a room scan's job)
     static let focusRegionNearPlaneM: Double = 0.05            // a box corner this close to the camera (or behind it) means "up against the box"
     static let focusRegionCentreMargin: Double = 0.1           // the box centre must project at least this far (fraction of the image) inside every edge
@@ -680,6 +681,7 @@ enum AppConstants {
     // Focus scan HUD and AR box
     static let focusHUDTopPadding: CGFloat = 96                // below the capture view's top status pills
     static let focusHUDDialSize: CGFloat = 76
+    static let focusHUDProgressWidth: CGFloat = 180            // the photo-count bar under the count line (fixed: a linear ProgressView would stretch the HUD)
     static let focusHUDBackgroundOpacity: Double = 0.6
     static let focusHUDDialHoleFraction: CGFloat = 0.3         // the dial's empty middle, as a share of its radius (the region sits there)
     static let focusHUDDialBoxFraction: CGFloat = 0.45         // the region square drawn in that middle, as a share of the hole

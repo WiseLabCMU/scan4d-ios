@@ -69,13 +69,18 @@ struct UserGuideView: View {
                               "work table. Tap a table or object in the scan to draw a box around it (or " +
                               "tap the surface for a default box), adjust it with the sliders, and pick " +
                               "how much to capture: Check takes about 5 photos and finishes by itself, " +
-                              "Detail about 30, Splat 150 or more for 3D reconstruction. Look around until " +
+                              "Detail about 30, Splat about 150 for 3D reconstruction (with extra photos " +
+                              "between new angles; its dial counts the new angles). A bar fills toward " +
+                              "the count; Detail and Splat say when there are enough and keep going until " +
+                              "you stop, so you can still fill a missed side. Look around until " +
                               "the ghost mesh appears (the scan can't start before that), and a yellow box " +
                               "shows the region: tap record and walk around it. If tracking is lost, the " +
                               "scan stops and keeps the photos taken so far. " +
                               "Photos are taken only while the box is in view; the dial fills with " +
                               "the directions you have covered. The result is a partial scan in the same " +
                               "location (no mesh of its own) that you can share or sync like any other. " +
+                              "Rescan on a focus scan's card photographs the same box again, at the level " +
+                              "you pick, so scans of that region over time line up. " +
                               "Once a space has focus scans, its list switches between Room, Focus and All " +
                               "(Room is the default; the list opens on a scan you just saved). " +
                               "A region file from another tool can be imported from the same menu. " +

@@ -2,9 +2,12 @@ import SwiftUI
 
 // MARK: - Focus scan capture HUD (docs/design/capture-modes.md)
 
-/// What the operator sees during a focus scan: the region and detail level, the still count
-/// against the target, one plain-language status line, and a coverage dial of the directions the
-/// region has been photographed from. Drawn near the top of the capture view; ignores touches.
+/// What the operator sees during a focus scan: the region and detail level, the photo count
+/// against the target with a bar filling toward it (Splat, which also saves repeats, adds its new
+/// angles), one plain-language status line, and a coverage dial of the directions the region has
+/// been photographed from. The target is a soft limit for Detail and Splat: at it the bar turns
+/// green and the status says there are enough, and capture runs on until Stop. Drawn near the top
+/// of the capture view; ignores touches.
 struct FocusCaptureHUD: View {
     let region: FocusRegion
     let stats: ARStillCaptureSession.LiveStats
@@ -23,9 +26,12 @@ struct FocusCaptureHUD: View {
                     Text(region.displayName).lineLimit(1)
                 }
                 .font(.subheadline.bold())
-                Text("\(region.detail.title) · \(stats.stillsSaved) of \(max(stats.targetStills, region.detail.targetStills)) photos")
+                Text(countLine)
                     .font(.caption.monospacedDigit())
                     .foregroundColor(.white.opacity(0.8))
+                ProgressView(value: Double(min(stats.stillsSaved, target)), total: Double(target))
+                    .tint(reachedTarget ? .green : .cyan)
+                    .frame(width: AppConstants.focusHUDProgressWidth)
                 Label(status.text, systemImage: status.symbol)
                     .labelStyle(.tintedIcon(status.tint))
                     .font(.caption.bold())
@@ -40,10 +46,20 @@ struct FocusCaptureHUD: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Stills per dial cell that read as "covered": the target spread over the cells.
+    /// Photos, every one counted (Check stops here; Detail and Splat say there are enough).
+    private var target: Int { max(1, stats.targetStills, region.detail.targetStills) }
+    private var reachedTarget: Bool { stats.stillsSaved >= target }
+
+    /// Photos against the target. Splat also saves repeats, so it adds the new angles, which are
+    /// what the dial shows.
+    private var countLine: String {
+        let photos = "\(region.detail.title) · \(stats.stillsSaved) of \(target) photos"
+        return region.detail.waitsForSpacing ? photos : photos + " · \(stats.newAnglesSaved) angles"
+    }
+
+    /// New angles per dial cell that read as "covered": the target spread over the cells.
     private var perCellTarget: Int {
         let cells = max(1, stats.coverageCounts.count)
-        let target = max(stats.targetStills, region.detail.targetStills)
         return max(1, Int((Double(target) / Double(cells)).rounded(.up)))
     }
 
@@ -52,7 +68,16 @@ struct FocusCaptureHUD: View {
             return ("Line up on the box, then tap record", "scope", .cyan)
         }
         switch stats.hold {
-        case .none, .saving: return ("Capturing", "camera.fill", .green)
+        case .none, .saving:
+            // Past the soft limit capture goes on (a missed side can still be filled), but say so.
+            if reachedTarget {
+                return ("Enough photos, tap stop when ready", "checkmark.circle.fill", .green)
+            }
+            // Splat keeps taking stills from where the operator stands; say when they add no angle.
+            if stats.lastReason == ARStillCaptureGates.repeatReason {
+                return ("Capturing, move to add angles", "camera.fill", .green)
+            }
+            return ("Capturing", "camera.fill", .green)
         case .tracking: return ("Hold on, finding tracking", "hourglass", .yellow)
         case .motion: return ("Hold steadier", "hand.raised.fill", .yellow)
         case .outOfView: return ("Point at the box", "viewfinder", .orange)
@@ -138,6 +163,47 @@ struct FocusCoverageDial: View {
     for cell in [0, 1, 2, 13, 14, 15, 26] { counts[cell] = 2 }
     stats.coverageCounts = counts
     let region = FocusRegion(center: .zero, size: SIMD3(1.2, 0.5, 0.8), label: "work table", detail: .detail)
+    return ZStack {
+        Color.gray
+        FocusCaptureHUD(region: region, stats: stats, isCapturing: true)
+    }
+}
+
+#Preview("Focus HUD, Splat repeating") {
+    var stats = ARStillCaptureSession.LiveStats()
+    stats.hasRegion = true
+    stats.detailLevel = .splat
+    stats.targetStills = 150
+    stats.stillsSaved = 97
+    stats.newAnglesSaved = 64
+    stats.regionInView = true
+    stats.regionAzimuthDeg = 140
+    stats.regionElevationDeg = 35
+    stats.lastReason = ARStillCaptureGates.repeatReason
+    var counts = [Int](repeating: 0, count: 36)
+    for cell in [0, 1, 2, 3, 4, 13, 14, 15, 16, 17, 18] { counts[cell] = 5 }
+    stats.coverageCounts = counts
+    let region = FocusRegion(center: .zero, size: SIMD3(1.2, 0.5, 0.8), label: "work table", detail: .splat)
+    return ZStack {
+        Color.gray
+        FocusCaptureHUD(region: region, stats: stats, isCapturing: true)
+    }
+}
+
+#Preview("Focus HUD, Splat past its soft limit") {
+    var stats = ARStillCaptureSession.LiveStats()
+    stats.hasRegion = true
+    stats.detailLevel = .splat
+    stats.targetStills = 150
+    stats.stillsSaved = 163
+    stats.newAnglesSaved = 118
+    stats.regionInView = true
+    stats.regionAzimuthDeg = 250
+    stats.regionElevationDeg = 10
+    var counts = [Int](repeating: 0, count: 36)
+    for cell in 0..<30 { counts[cell] = 4 }
+    stats.coverageCounts = counts
+    let region = FocusRegion(center: .zero, size: SIMD3(1.2, 0.5, 0.8), label: "work table", detail: .splat)
     return ZStack {
         Color.gray
         FocusCaptureHUD(region: region, stats: stats, isCapturing: true)

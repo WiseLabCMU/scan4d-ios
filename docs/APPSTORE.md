@@ -39,7 +39,7 @@ Scan4D is a reality capture app for LiDAR-equipped iPhone and iPad. It turns the
 • Scan capacity metrics: polygon count, drift tracking, session duration
 • Scan coaching: real-time tips on tracking, scanning pattern, and progress
 • Automatic hi-res photos: sharp native-resolution stills taken whenever the device is steady and the view has changed, with a coverage overlay showing where photos are still needed
-• Focus scans: draw a box around one area (a work table, a shelf) on a previous scan and photograph it in detail, from a quick check to dense coverage for 3D reconstruction, with a live dial of the angles covered
+• Focus scans: draw a box around one area (a work table, a shelf) on a previous scan and photograph it in detail, from a quick check to dense coverage for 3D reconstruction, with a live dial of the angles covered; rescan the same box later to see how it changed
 • Space staging analyzer: an optional 360° sweep before scanning checks lighting, doors, screens, and people, with tips
 • Interactive 3D preview with camera-sampled vertex colors
 • Privacy filtering: people removed from meshes and faces blurred in exported images; switched off, it turns itself back on after 24 hours
