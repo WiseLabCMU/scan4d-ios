@@ -160,12 +160,15 @@ final class FocusSplatARTests: XCTestCase {
         XCTAssertEqual(FocusSplatARView.pill(.aligned(note: "move slower")).text, "Aligned · move slower")
     }
 
-    /// The budget shrinks while the phone is hot and never goes below nothing.
+    /// The budget shrinks while the phone is hot and never goes below nothing. With no budget set,
+    /// there is no limit until the phone is critically hot, and then nothing is drawn.
     func testTheBudgetFollowsItsScale() {
         let overlay = FocusSplatOverlay()
         XCTAssertEqual(overlay.budget, AppConstants.splatPreviewBudget)
         overlay.setBudgetScale(AppConstants.splatARSeriousBudgetShare)
-        XCTAssertEqual(overlay.budget, Int(Double(AppConstants.splatPreviewBudget) * AppConstants.splatARSeriousBudgetShare))
+        XCTAssertEqual(overlay.budget, AppConstants.splatPreviewBudget.map {
+            Int(Double($0) * AppConstants.splatARSeriousBudgetShare)
+        })
         overlay.setBudgetScale(0)
         XCTAssertEqual(overlay.budget, 0)
         overlay.selection = .init(askedFor: [UUID()])

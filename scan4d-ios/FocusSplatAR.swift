@@ -729,7 +729,8 @@ struct FocusSplatARView: View {
         overlay.tap(scan)
     }
 
-    /// Hot: the budget shrinks (half at serious, none at critical), and a note names what went.
+    /// Hot: the budget shrinks (half at serious when there is a budget, none at critical), and a
+    /// note names what went.
     private func applyThermalState() {
         let state = ProcessInfo.processInfo.thermalState
         let scale: Double
@@ -741,7 +742,7 @@ struct FocusSplatARView: View {
         guard scale != overlay.budgetScale else { return }
         let before = shownIds
         overlay.setBudgetScale(scale)
-        PerfDiag.log("[SplatAR] thermal state \(state.rawValue): budget \(overlay.budget)")
+        PerfDiag.log("[SplatAR] thermal state \(state.rawValue): budget \(overlay.budget.map(String.init) ?? "none")")
         let hidden = request.scans.filter { before.contains($0.id) && !shownIds.contains($0.id) }.map(\.name)
         guard !hidden.isEmpty else { return }
         withAnimation { toast = "The phone is hot: hid " + hidden.joined(separator: ", ") }

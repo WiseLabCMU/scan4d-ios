@@ -11,9 +11,9 @@ import UIKit
 // the box (the mesh's fragments inside a shown splat's box are discarded by a shader modifier). AR
 // (FocusSplatAR.swift) draws the space's focus splats over the camera instead, in the frame of the
 // room scan it relocalized into, with a chip over each box, and reads nothing until it has. Splats
-// on the phone show by themselves, newest first, within the budget; a legend row (or, in AR, a
-// box) shows, hides or downloads its splat, and the one asked for last always wins the budget.
-// Boxes over the same place, one region scanned at different times, show one splat at a time.
+// on the phone show by themselves, newest first, within the budget when there is one; a legend row
+// (or, in AR, a box) shows, hides or downloads its splat, and the one asked for last always wins the
+// budget. Boxes over the same place, one region scanned at different times, show one splat at a time.
 
 /// A focus scan the preview or AR can show, snapshotted on the main actor.
 struct PreviewFocusScan: Identifiable, Equatable {
@@ -150,7 +150,7 @@ final class FocusSplatOverlay {
         case overBudget
         /// On the phone, not drawn: a newer splat (or one asked for since) of the same place is.
         case covered
-        /// Larger than the whole budget: this phone never draws it.
+        /// Larger than the whole budget (`AppConstants.splatPreviewBudget`): never drawn.
         case tooLarge(count: Int)
         /// Larger than the budget left while the phone is hot.
         case cooling
@@ -179,14 +179,19 @@ final class FocusSplatOverlay {
     /// Gaussians drawn now, against `budget`.
     private(set) var drawnCount = 0
     /// The share of `AppConstants.splatPreviewBudget` in use: below 1 while the phone is hot (AR).
+    /// With no budget, only 0 (critical) changes anything: then nothing is drawn.
     private(set) var budgetScale: Double = 1
     /// Every splat's opacity, 0...1 (AR's fade and hold).
     @ObservationIgnored var opacity: Float = 1 {
         didSet { for entry in loaded.values { entry.renderer.opacity = opacity } }
     }
 
-    /// Gaussians that may be drawn at once.
-    var budget: Int { Int(Double(AppConstants.splatPreviewBudget) * max(0, min(1, budgetScale))) }
+    /// Gaussians that may be drawn at once; nil for no limit.
+    var budget: Int? {
+        let scale = max(0, min(1, budgetScale))
+        guard let base = AppConstants.splatPreviewBudget else { return scale > 0 ? nil : 0 }
+        return Int(Double(base) * scale)
+    }
 
     var selection: Selection {
         get { Selection(askedFor: askedFor, switchedOff: switchedOff) }
@@ -356,10 +361,11 @@ final class FocusSplatOverlay {
             box.isHidden = mode == .off
         }
 
-        // Which splats to draw: those asked for, then the newest, while the budget lasts; of boxes
-        // over the same place, only the first.
+        // Which splats to draw: those asked for, then the newest, while the budget (if any) lasts; of
+        // boxes over the same place, only the first.
         let order = scans.sorted { rank($0.id) < rank($1.id) }
-        var left = budget
+        let cap = budget
+        var left = cap
         var wanted: [UUID: ScanLayer] = [:]
         var drawnBoxes: [(frame: simd_float4x4, half: SIMD3<Float>)] = []
         var next: [UUID: RowState] = [:]
@@ -383,19 +389,21 @@ final class FocusSplatOverlay {
                 continue
             }
             let count = local.meta?.count ?? 0
-            if count > AppConstants.splatPreviewBudget {
+            if let whole = AppConstants.splatPreviewBudget, count > whole {
                 next[scan.id] = .tooLarge(count: count)
                 continue
             }
-            if count > budget {
+            if let cap, cap == 0 || count > cap {
                 next[scan.id] = .cooling
                 continue
             }
-            guard count <= left else {
-                next[scan.id] = .overBudget
-                continue
+            if let remaining = left {
+                guard count <= remaining else {
+                    next[scan.id] = .overBudget
+                    continue
+                }
+                left = remaining - count
             }
-            left -= count
             wanted[scan.id] = local
             drawnBoxes.append((frame, half))
         }
@@ -678,7 +686,8 @@ struct FocusSplatLegend: View {
                 Image(systemName: "scope")
                 Text("Focus scans")
                 if mode == .splats, overlay.drawnCount > 0 {
-                    Text(Self.millions(overlay.drawnCount) + " of " + Self.millions(overlay.budget))
+                    Text(overlay.budget.map { Self.millions(overlay.drawnCount) + " of " + Self.millions($0) }
+                         ?? Self.millions(overlay.drawnCount) + " drawn")
                         .foregroundColor(.white.opacity(0.6))
                 }
             }
@@ -734,7 +743,7 @@ struct FocusSplatLegend: View {
         case .covered:
             return ("square.on.square.dashed", "tap to show instead", .white.opacity(0.6), true)
         case .tooLarge(let count):
-            return ("exclamationmark.triangle", millions(count) + ", too large for this phone", .orange, false)
+            return ("exclamationmark.triangle", millions(count) + ", over the app's splat limit", .orange, false)
         case .cooling:
             return ("thermometer.high", "paused while the phone is hot", .orange, false)
         case .waiting:
