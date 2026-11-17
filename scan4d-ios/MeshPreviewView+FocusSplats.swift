@@ -388,7 +388,7 @@ final class FocusSplatOverlay {
                 next[scan.id] = .covered
                 continue
             }
-            let count = local.meta?.count ?? 0
+            let count = local.installedCount ?? 0
             if let whole = AppConstants.splatPreviewBudget, count > whole {
                 next[scan.id] = .tooLarge(count: count)
                 continue

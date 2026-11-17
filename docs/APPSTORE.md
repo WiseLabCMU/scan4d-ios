@@ -68,7 +68,7 @@ FLEXIBLE EXPORT FORMATS
 SCAN4D SERVER SYNC
 • Sync to your own Scan4D server: each space's map, then every processed scan as one bundle
 • Choose which spaces sync, and keep test scans on the device
-• Gaussian splats the server makes of your focus scans download to the phone, open in a 3D viewer, replace the mesh inside their box in the room's preview, and show in AR over the space as it is now
+• Gaussian splats the server makes of your focus scans download to the phone, light (a few MB) or full, open in a 3D viewer, replace the mesh inside their box in the room's preview, and show in AR over the space as it is now
 • Bundles upload in the background over Wi-Fi, even with the screen locked, with a sync badge on each space
 • Share to Files or AirDrop for offline workflows
 

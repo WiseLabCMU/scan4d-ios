@@ -47,6 +47,7 @@ enum AppConstants {
         static let controlPlaneBundlesRefused = "controlPlaneBundlesRefused"   // bundles the server refused for good (403, 404, 413), with the version refused (JSON): not sent again until it changes or Retry
         static let controlPlaneBundleStates = "controlPlaneBundleStates"       // each scan's bundle as the server last reported it (JSON), for the sync badge after a relaunch
         static let controlPlaneLayers = "controlPlaneLayers"                   // each scan's layers (its splat) as the server last reported them (JSON), for the card line after a relaunch (REQ-041)
+        nonisolated static let splatQuality = "splatQuality"                   // read by SplatQuality.current anywhere; which level of a splat layer Download fetches: light (the default) or full (REQ-041)
         static let controlPlaneStateServer = "controlPlaneStateServer"         // the control plane (base URL) the confirmed spaces and bundle states came from; another one starts them afresh
         static let legacyControlPlaneSendPackages = "controlPlaneSendPackages" // builds before bundles: Send map packages (off = nothing but the JSON went); read once to deselect every scan, then removed
         static let controlPlaneAllowUntrusted = "controlPlaneAllowUntrusted" // accept the server's own (self-signed) certificate from the control plane and the upload hosts it names
@@ -701,6 +702,8 @@ enum AppConstants {
     // Focus splats in the room's 3D preview (REQ-041)
     static let splatPreviewBudget: Int? = nil                  // Gaussians drawn at once, nil for no limit: every splat on the phone draws, and the server's splat size is the knob. 3M was a guess (refused a 4M splat on an M1 iPad); set one once measured on devices
     static let splatPreviewMaxCuts = 8                         // focus boxes the mesh can be cut by at once (one shader argument each)
+    /// `nonisolated`: read by SplatQuality.current, which runs anywhere.
+    nonisolated static let splatQuality: SplatQuality = .light // the level Download fetches until the Server tab says otherwise: light (250k Gaussians, a few MB) draws on every phone; full is tens of MB
     static let splatChipHeightM: Float = 0.09                  // AR: the label over each focus box
     static let splatARSlowFindSeconds: Double = 20             // AR: relocalizing this long, the hint says where to stand
     static let splatARSeriousBudgetShare: Double = 0.5         // AR: the splat budget's share at thermal state serious, when there is a budget (none at critical either way)

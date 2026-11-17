@@ -88,7 +88,9 @@ struct UserGuideView: View {
                               "request waits in the To do list on the Dashboard, even offline (an urgent one also " +
                               "alerts once), and Open takes you to the region in the editor. " +
                               "When the server makes a splat (a photo-real 3D model) of a focus scan, the " +
-                              "scan's card says so: tap Download. Tapping the card then opens the splat in " +
+                              "scan's card says so: tap Download. It comes in Light quality, a few MB that any " +
+                              "phone draws smoothly; Splat Quality in the Server tab switches to Full, " +
+                              "everything the server trained. Tapping the card then opens the splat in " +
                               "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills. " +
                               "The room's mesh preview shows all of the space's focus scans, whichever room " +
                               "scan you are looking at: the scope button steps through off, their boxes, and " +

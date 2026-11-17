@@ -79,6 +79,11 @@ struct StatusIconsGuideSections: View {
                                "keeps it.")
             layerLineRow(.update(bytes: 15_700_000),
                          text: "The server made a newer splat of the scan. Update replaces the copy on this phone.")
+            layerLineRow(.otherLevel(onPhone: "full", bytes: 3_100_000),
+                         text: "The splat on this phone is in the other quality than the Server tab's Splat " +
+                               "Quality: Light, a few MB that any phone draws smoothly, or Full, everything the " +
+                               "server trained. Download replaces it with the quality chosen; until then the " +
+                               "phone draws the one it has.")
             layerLineRow(.failed("Can't reach the server"),
                          text: "The download didn't finish, and the reason follows. Retry picks it up where it " +
                                "stopped. A splat that changed on the server while it downloaded is refused: " +

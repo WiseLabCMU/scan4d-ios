@@ -83,20 +83,23 @@ struct SyncLine: View {
 struct LayerLine: View {
     let scan: CapturedScan
     var kind = ScanLayer.splat
+    @AppStorage(AppConstants.Key.splatQuality) private var quality = AppConstants.splatQuality
 
     var body: some View {
         let layers = ScanLayers.shared
         let id: UUID = scan.id
-        if let line = layers.line(for: id, kind: kind) {
+        if let line = layers.line(for: id, kind: kind, quality: quality) {
             let look = Self.look(line)
             HStack(spacing: 4) {
                 Image(systemName: "cube.transparent")
                 Text(look.text).lineLimit(2)
                 if let action = look.action, ControlPlaneSync.shared.client != nil {
-                    Button(action) { layers.download(scanId: id, scanDirectory: scan.scanDirectory, kind: kind) }
-                        .buttonStyle(.borderless)
-                        .font(.caption2.bold())
-                        .foregroundColor(.cyan)
+                    Button(action) {
+                        layers.download(scanId: id, scanDirectory: scan.scanDirectory, kind: kind, quality: quality)
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption2.bold())
+                    .foregroundColor(.cyan)
                 }
             }
             .font(.caption2)
@@ -124,6 +127,10 @@ struct LayerLine: View {
             return ("Splat on this phone" + (stale ? older : ""), nil, .green.opacity(0.8))
         case .update(let bytes):
             return ("Newer splat on the server · \(size(bytes))", "Update", .white.opacity(0.7))
+        case .otherLevel(let onPhone, let bytes):
+            let held = SplatQuality(rawValue: onPhone)?.title ?? onPhone
+            return ("\(held) splat on this phone · the other quality on the server · \(size(bytes))", "Download",
+                    .white.opacity(0.7))
         case .localOnly:
             return ("Splat on this phone (no longer on the server)", nil, .white.opacity(0.7))
         case .failed(let message):
@@ -133,6 +140,33 @@ struct LayerLine: View {
 
     private static func size(_ bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+/// The Server tab's splat quality (REQ-041): which level of a splat the cards' Download fetches.
+/// Light by default, small enough for every phone; Full for a device that draws more. A splat on the
+/// phone at the other level stays until its card's Download replaces it.
+struct SplatQualitySection: View {
+    @AppStorage(AppConstants.Key.splatQuality) private var quality = AppConstants.splatQuality
+
+    var body: some View {
+        Section {
+            Picker("Splat quality", selection: $quality) {
+                ForEach(SplatQuality.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.vertical, 4)
+        } header: {
+            Text("SPLATS")
+        } footer: {
+            Text("The server makes each splat in two qualities. Light: about 250,000 points and a few MB, " +
+                 "which any phone draws smoothly. Full: everything the server trained, up to millions of " +
+                 "points and tens of MB: sharper up close, slower to download and to draw. Changing it " +
+                 "doesn't remove splats already on this phone: their cards offer the other quality to download.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
+        .listRowBackground(Color.white.opacity(0.05))
     }
 }
 
@@ -295,6 +329,15 @@ private struct PendingBundleRow: View {
     SyncLine(scan: CapturedScan(name: "Sample Scan", vertexCount: 1500, faceCount: 2000))
         .padding()
         .background(Color.black)
+}
+
+#Preview("Splat quality") {
+    NavigationStack {
+        List { SplatQualitySection() }
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+    }
+    .preferredColorScheme(.dark)
 }
 
 #Preview("Pending bundles") {

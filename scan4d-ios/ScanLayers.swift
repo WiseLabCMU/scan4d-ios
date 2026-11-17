@@ -17,7 +17,7 @@ nonisolated struct ScanLayer: Codable, Equatable, Sendable {
 
     nonisolated struct File: Codable, Equatable, Sendable {
         let name: String
-        /// `full`, or `phone`: a variant small enough for a phone.
+        /// Its quality level: `full`, or `light`, the same made small enough for a phone (`SplatQuality`).
         let role: String
         let bytes: Int64
         let sha256: String
@@ -34,11 +34,17 @@ nonisolated struct ScanLayer: Codable, Equatable, Sendable {
         let toCanonical: [Float]?
     }
 
-    /// The kind's own fields. A splat: its Gaussian count, SOG version and SH degree.
+    /// The kind's own fields. A splat: its full level's Gaussian count, SOG version and SH degree,
+    /// and each level's own by role (`levels`, from servers since levels).
     nonisolated struct Meta: Codable, Equatable, Sendable {
+        nonisolated struct Level: Codable, Equatable, Sendable {
+            let count: Int?
+        }
+
         let count: Int?
         let sogVersion: Int?
         let shDegree: Int?
+        let levels: [String: Level]?
     }
 
     let kind: String
@@ -50,14 +56,53 @@ nonisolated struct ScanLayer: Codable, Equatable, Sendable {
     let files: [File]
     let placement: Placement?
     let meta: Meta?
+    /// The level of the file this phone holds, set when it is installed (`LayerCache.install`): nil
+    /// in the server's reply, and in a copy from before levels, which holds the full file.
+    var installedRole: String?
 
     static let splat = "splat"
+    static let fullRole = "full"
 
     var scanId: UUID? { subject.scanId.flatMap(UUID.init(uuidString:)) }
     var isStale: Bool { state == "stale" }
 
-    /// The file this phone downloads: the phone variant when the server made one, else the full one.
-    var phoneFile: File? { files.first { $0.role == "phone" } ?? files.first { $0.role == "full" } ?? files.first }
+    /// The file to download at `quality`: that level's, else the full one (a layer from before
+    /// levels, or made with the full level only), else the layer's first.
+    func file(for quality: SplatQuality) -> File? {
+        files.first { $0.role == quality.rawValue } ?? files.first { $0.role == Self.fullRole } ?? files.first
+    }
+
+    /// The file a copy on this phone holds.
+    var installedFile: File? {
+        installedRole.flatMap { role in files.first { $0.role == role } } ?? file(for: .full)
+    }
+
+    /// The Gaussians in the file a copy on this phone holds: its level's count, else the full level's
+    /// (a layer from before levels).
+    var installedCount: Int? {
+        installedFile.flatMap { meta?.levels?[$0.role]?.count } ?? meta?.count
+    }
+}
+
+/// Which level of a splat layer this phone downloads (scan4d-server README, "Layers"), set in the
+/// Server tab. Light, the default: the splat merged down to 250k Gaussians and retrained, a few MB,
+/// which every phone draws. Full: every Gaussian the server trained, tens of MB. A layer without the
+/// level asked for gives its full file.
+nonisolated enum SplatQuality: String, CaseIterable, Sendable {
+    case light
+    case full
+
+    var title: String {
+        switch self {
+        case .light: "Light"
+        case .full: "Full"
+        }
+    }
+
+    static var current: SplatQuality {
+        UserDefaults.standard.string(forKey: AppConstants.Key.splatQuality).flatMap(SplatQuality.init(rawValue:))
+            ?? AppConstants.splatQuality
+    }
 }
 
 // MARK: - The copy on this phone
@@ -89,7 +134,7 @@ nonisolated enum LayerCache {
 
     /// The downloaded file, where a viewer opens it.
     static func fileURL(scanDirectory: URL, layer: ScanLayer) -> URL? {
-        layer.phoneFile.map { directory(scanDirectory: scanDirectory, kind: layer.kind).appendingPathComponent($0.name) }
+        layer.installedFile.map { directory(scanDirectory: scanDirectory, kind: layer.kind).appendingPathComponent($0.name) }
     }
 
     /// Checks `downloaded` against the file's sha256, then swaps it in as the scan's copy of the
@@ -246,6 +291,9 @@ final class ScanLayers {
         case ready(stale: Bool)
         /// On this phone, and the server has a newer one.
         case update(bytes: Int64)
+        /// On this phone at another level (`onPhone`, a role) than the Server tab's Splat Quality; that
+        /// level is on the server.
+        case otherLevel(onPhone: String, bytes: Int64)
         /// On this phone; the server no longer reports one.
         case localOnly
         case failed(String)
@@ -269,13 +317,14 @@ final class ScanLayers {
         remote[scanId]?.first { $0.kind == kind }
     }
 
-    func line(for scanId: UUID, kind: String = ScanLayer.splat) -> Line? {
+    func line(for scanId: UUID, kind: String = ScanLayer.splat, quality: SplatQuality = .current) -> Line? {
         let key = Self.key(scanId, kind)
-        return Self.line(remote: layer(scanId, kind: kind), local: local[key]?.version,
+        return Self.line(remote: layer(scanId, kind: kind), local: local[key], quality: quality,
                          downloading: downloading[key], failure: failures[key])
     }
 
-    nonisolated static func line(remote: ScanLayer?, local: String?, downloading: Double?, failure: String?) -> Line? {
+    nonisolated static func line(remote: ScanLayer?, local: ScanLayer?, quality: SplatQuality, downloading: Double?,
+                                 failure: String?) -> Line? {
         if let downloading { return .downloading(downloading) }
         switch (remote, local) {
         case (nil, nil):
@@ -284,11 +333,14 @@ final class ScanLayers {
             return .localOnly
         case (let layer?, nil):
             if let failure { return .failed(failure) }
-            return .available(bytes: layer.phoneFile?.bytes ?? 0, stale: layer.isStale)
-        case (let layer?, let version?):
-            if version == layer.version { return .ready(stale: layer.isStale) }
+            return .available(bytes: layer.file(for: quality)?.bytes ?? 0, stale: layer.isStale)
+        case (let layer?, let copy?):
+            let wanted = layer.file(for: quality)
+            let held = copy.installedFile?.role ?? ScanLayer.fullRole
+            if copy.version == layer.version, wanted == nil || wanted?.role == held { return .ready(stale: layer.isStale) }
             if let failure { return .failed(failure) }
-            return .update(bytes: layer.phoneFile?.bytes ?? 0)
+            if copy.version == layer.version { return .otherLevel(onPhone: held, bytes: wanted?.bytes ?? 0) }
+            return .update(bytes: wanted?.bytes ?? 0)
         }
     }
 
@@ -345,17 +397,19 @@ final class ScanLayers {
 
     // MARK: Downloading
 
-    /// Downloads the server's latest copy of the scan's layer (resuming a broken download), then
-    /// swaps it in for the copy on this phone. Nothing without a control plane.
-    func download(scanId: UUID, scanDirectory: URL, kind: String = ScanLayer.splat) {
+    /// Downloads the server's latest copy of the scan's layer at `quality` (resuming a broken
+    /// download), then swaps it in for the copy on this phone. Nothing without a control plane.
+    func download(scanId: UUID, scanDirectory: URL, kind: String = ScanLayer.splat, quality: SplatQuality = .current) {
         let key = Self.key(scanId, kind)
         guard downloading[key] == nil, let client = ControlPlaneSync.shared.client,
-              let layer = self.layer(scanId, kind: kind), let file = layer.phoneFile else { return }
-        // Resume data is for one version: a newer one starts afresh.
-        if pending[key]?.layer.version != layer.version { resumeData[key] = nil }
+              let layer = self.layer(scanId, kind: kind), let file = layer.file(for: quality) else { return }
+        // Resume data is for one file of one version: another starts afresh.
+        if pending[key]?.layer.version != layer.version || pending[key]?.file.name != file.name { resumeData[key] = nil }
         failures[key] = nil
         downloading[key] = 0
-        pending[key] = (layer, file, scanDirectory)
+        var copy = layer
+        copy.installedRole = file.role
+        pending[key] = (copy, file, scanDirectory)
         LayerDownloads.start(client.layerFileRequest(file), resumeData: resumeData.removeValue(forKey: key), key: key)
     }
 
