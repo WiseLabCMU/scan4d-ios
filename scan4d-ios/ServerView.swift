@@ -5,7 +5,8 @@ import SwiftUI
 
 /// The Scan4D server this phone syncs with (scan4d-server), in one place: how the last sync went,
 /// with Sync now; which spaces sync (the default for new ones, and each space's switch); the
-/// bundles waiting to go, with the Wi-Fi rule and the checklist; and the connection (host,
+/// bundles waiting to go, with the Wi-Fi rule and the checklist; the splat quality downloads fetch;
+/// and the connection (host,
 /// password, this phone's name, certificates). What the phone can later pull down from the server
 /// (maps from other devices) belongs here too.
 struct ServerView: View {
@@ -19,6 +20,7 @@ struct ServerView: View {
                 if ControlPlaneClient.baseURL(fromHost: host) != nil {
                     ServerSpacesSection(locations: locations)
                     PendingBundlesSections(locations: locations)
+                    SplatQualitySection()
                 }
                 ControlPlaneSettingsSection()
             }

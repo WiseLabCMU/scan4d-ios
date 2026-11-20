@@ -183,6 +183,7 @@ final class ControlPlaneSync {
             applyLinkUpdates(reply.linkUpdates ?? [])
             receive(result.tasks)
             BundleSync.shared.received(reply.bundles ?? [], filterOff: filterOff)
+            ScanLayers.shared.received(reply.layers, reported: Set(draft.locations.flatMap(\.scans).map(\.scanId)))
             var summary = "\(reply.maps) spaces, \(reply.scans) scans, \(reply.links) links"
             PerfDiag.log("[ControlPlane] synced: \(summary), \(reply.markedGone) marked gone, "
                          + "\(reply.wanted?.count ?? 0) files wanted, "
@@ -226,6 +227,7 @@ final class ControlPlaneSync {
             confirmedSpaces = []
             UserDefaults.standard.removeObject(forKey: AppConstants.Key.controlPlaneConfirmedSpaces)
             BundleSync.shared.serverChanged()
+            ScanLayers.shared.serverChanged()
         }
         UserDefaults.standard.set(server, forKey: key)
     }

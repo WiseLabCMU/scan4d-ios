@@ -68,6 +68,7 @@ FLEXIBLE EXPORT FORMATS
 SCAN4D SERVER SYNC
 • Sync to your own Scan4D server: each space's map, then every processed scan as one bundle
 • Choose which spaces sync, and keep test scans on the device
+• Gaussian splats the server makes of your focus scans download to the phone, light (a few MB) or full, open in a 3D viewer, replace the mesh inside their box in the room's preview, and show in AR over the space as it is now
 • Bundles upload in the background over Wi-Fi, even with the screen locked, with a sync badge on each space
 • Share to Files or AirDrop for offline workflows
 
@@ -94,6 +95,7 @@ Requires a LiDAR-equipped iPhone or iPad Pro. Meta Ray-Ban Smart Glasses support
 • Naming after save: the name prompt now waits for the save pipeline, eliminating the frozen-keyboard stall on stop
 • Bad-scan warning right after save so a failed capture can be redone on the spot
 • Scan4D server sync: each space's map, then each processed scan as one bundle, in the background over Wi-Fi; a cloud on each space shows whether the server has its map or everything (replaces Upload and the upload URL)
+• Focus splats: when the server makes a Gaussian splat of a focus scan, its card offers it; tap Download, then tap the card to orbit the splat in its box, see it in place in the room's 3D preview, or lay it over the space itself in AR, dated, to compare then and now
 • Space analyzer: sweep progress in real degrees with honest partial results on timeout
 • Faster, safer exports: memory-bounded blur pipeline and double-tap guards on process, share, and delete
 • Tracking recovery: automatic session re-bootstrap after a mid-scan tracking collapse

@@ -31,6 +31,9 @@ nonisolated struct ControlPlaneClient: Sendable {
         let bundles: [BundleState]?
         /// Fine-tunes to apply: the web's edits, or the revision number of this device's own.
         let linkUpdates: [LinkUpdate]?
+        /// What the server made from the reported scans: their splats (REQ-041; absent from servers
+        /// before layers).
+        let layers: [ScanLayer]?
     }
 
     /// A scan's bundle as the server reports it (scan4d-server README, "Bundles"): `none`,
@@ -181,6 +184,20 @@ nonisolated struct ControlPlaneClient: Sendable {
         request.allowsCellularAccess = !wifiOnly
         request.allowsExpensiveNetworkAccess = !wifiOnly
         request.allowsConstrainedNetworkAccess = !wifiOnly
+        return request
+    }
+
+    /// The GET for one of a layer's files (REQ-041), downloaded by `LayerDownloads`. The server gives
+    /// its path from its own root, so it is joined to the base URL the way every request is, which
+    /// keeps a path prefix (`https://example.com/scan4d`).
+    func layerFileRequest(_ file: ScanLayer.File) -> URLRequest {
+        let path = file.url.hasPrefix("/") ? String(file.url.dropFirst()) : file.url
+        var request = URLRequest(url: baseURL.appending(path: path))
+        request.timeoutInterval = AppConstants.controlPlaneUploadTimeoutS
+        let password = ControlPlaneSecret.password
+        if !password.isEmpty {
+            request.setValue("Bearer \(password)", forHTTPHeaderField: "Authorization")
+        }
         return request
     }
 

@@ -984,73 +984,20 @@ struct ARCoverageView: UIViewRepresentable {
         // Room-outline source: the ghost's plane rectangles (already de-registered into the
         // ghost's raw frame — same frame as the proxy OBJ; set by resetGhostAutoAlign before
         // every loadGhostMesh call site). Captured on main here, used on the build queue below.
-        // Floors a derived level REPLACED are dropped: the builder swapped that quad for the
-        // level's own rectangle, so outlining the floor draws a border around geometry the proxy
-        // does not contain.
-        let derivedLevelYs = coordinator.ghostDerivedLevelYs
-        let outlinePlanes = (coordinator.ghostIsProxy ? coordinator.ghostReferencePlanes : [])
-            .filter { p in
-                !(p.category == .floor && Self.outlinedFloorIsReplaced(floorY: p.center.y,
-                                                                       levelYs: derivedLevelYs))
-            }
+        let outlinePlanes = GhostWireframe.outlinePlanes(isProxy: coordinator.ghostIsProxy,
+                                                         planes: coordinator.ghostReferencePlanes,
+                                                         levelYs: coordinator.ghostDerivedLevelYs)
         DispatchQueue.global(qos: .userInitiated).async {
-            // Build procedural wireframe: thin 3D quads for each unique edge. A proxy ghost's
-            // RoomPlan quads are already baked INTO the OBJ at save (coordinate-locked with the
-            // mesh remainder), so the LATTICE needs no dynamic assembly — but the TRAILING lattice
-            // faces (count in the v4 header) render with thick lines: the sparse 1 m grid is
-            // sub-pixel at the mesh's 1 mm default beyond ~1.5 m and visually vanishes. The room
-            // OUTLINE below IS assembled here, and deliberately from the AUTO-ALIGN REFERENCE set
-            // (the very planes handed to PlaneRegistration.register) minus the floors a derived
-            // level replaced — not from the set the builder actually baked.
-            var descriptors: [MeshDescriptor]
-            if coordinator.ghostIsProxy,
-               let quadFaces = Self.ghostProxyQuadFaceCount(from: data), quadFaces > 0,
-               let parsed = MeshParser.parseOBJ(from: data), parsed.faces.count > quadFaces {
-                let split = parsed.faces.count - quadFaces
-                descriptors = MeshParser.buildWireframeDescriptors(
-                    vertices: parsed.vertices, faces: Array(parsed.faces[..<split]), thickness: 0.001)
-                // Cross-section (not flat-ribbon) lines for the lattice: a flat ribbon with a
-                // fixed perpendicular is edge-on/backface-invisible for axis-aligned grid lines
-                // on walls of particular orientations (the "clips on some walls" finding).
-                descriptors += MeshParser.buildCrossWireframeDescriptors(
-                    vertices: parsed.vertices, faces: Array(parsed.faces[split...]),
-                    thickness: Self.ghostProxyQuadLineThickness)
-            } else {
-                descriptors = MeshParser.generateWireframeDescriptors(from: data)
-            }
+            // The lines (GhostWireframe, shared with AR's splat view).
+            let parts = GhostWireframe.build(data: data, isProxy: coordinator.ghostIsProxy, outlinePlanes: outlinePlanes)
+            let descriptors = parts.mesh, outlineDescriptors = parts.outline
             guard !descriptors.isEmpty else { return }
 
-            // Room OUTLINE: each plane rectangle's 4 border edges — the wall-wall vertical
-            // corners, the wall-floor seams, and the ceiling line — drawn bolder and lighter than
-            // the interior lattice so the room's structural box reads at a glance (architectural-
-            // drawing emphasis). Adjacent rects contribute coincident borders (a wall's bottom ≈
-            // the floor's edge) — harmless, same color. Rendered as children of the same container
-            // so it rides auto-align / manual nudge / de-registration with everything else.
-            var outlineDescriptors: [MeshDescriptor] = []
-            if !outlinePlanes.isEmpty {
-                var edges: [(SIMD3<Float>, SIMD3<Float>)] = []
-                for p in outlinePlanes {
-                    let hx = p.xAxis * (p.width / 2)
-                    let hy = p.yAxis * (p.height / 2)
-                    let c00 = p.center - hx - hy, c10 = p.center + hx - hy
-                    let c11 = p.center + hx + hy, c01 = p.center - hx + hy
-                    edges.append(contentsOf: [(c00, c10), (c10, c11), (c11, c01), (c01, c00)])
-                }
-                outlineDescriptors = MeshParser.buildCrossWireframeDescriptors(
-                    edges: edges, thickness: Self.ghostProxyOutlineThickness)
-            }
-
             DispatchQueue.main.async {
-                let ghostColorStr = UserDefaults.standard.string(forKey: AppConstants.Key.ghostMeshColor) ?? AppConstants.ghostMeshColor
-                let color = ghostColorStr.toSIMD4Color
+                let colors = GhostWireframe.colors()
                 // Fully opaque UnlitMaterial — the only stable material in ARView
-                let material = UnlitMaterial(rgb: color)
-                // Outline: same hue, strongly lightened — reads as the same ghost's frame while
-                // separating architecture from content, and can't collide with the live-scan
-                // color whatever the user picked for either.
-                let outlineColor = simd_mix(color, SIMD4<Float>(1, 1, 1, color.w),
-                                            SIMD4<Float>(repeating: 0.55))
-                let outlineMaterial = UnlitMaterial(rgb: outlineColor)
+                let material = UnlitMaterial(rgb: colors.mesh)
+                let outlineMaterial = UnlitMaterial(rgb: colors.outline)
 
                 let containerEntity = Entity()
 

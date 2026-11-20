@@ -86,7 +86,24 @@ struct UserGuideView: View {
                               "A region file from another tool can be imported from the same menu. " +
                               "With a Scan4D server set, it can also ask for a focus scan: the " +
                               "request waits in the To do list on the Dashboard, even offline (an urgent one also " +
-                              "alerts once), and Open takes you to the region in the editor."
+                              "alerts once), and Open takes you to the region in the editor. " +
+                              "When the server makes a splat (a photo-real 3D model) of a focus scan, the " +
+                              "scan's card says so: tap Download. It comes in Light quality, a few MB that any " +
+                              "phone draws smoothly; Splat Quality in the Server tab switches to Full, " +
+                              "everything the server trained. Tapping the card then opens the splat in " +
+                              "its box: drag to turn it, pinch to zoom, and switch to Photos for the stills. " +
+                              "The room's mesh preview shows all of the space's focus scans, whichever room " +
+                              "scan you are looking at: the scope button steps through off, their boxes, and " +
+                              "their boxes with splats drawn in place of the mesh. Tap a focus scan in the " +
+                              "legend to show, hide or download its splat. " +
+                              "The AR button, in the mesh preview or beside a splat, lays the space's splats " +
+                              "over the camera where they were captured: point at the space and move slowly " +
+                              "until the pill says Aligned (Try Again if it says Lost); the splats load only " +
+                              "then. The room scan's ghost, as in Rescan, shows how well AR found the room: " +
+                              "its lines should sit on the walls and furniture (the Room button hides it). " +
+                              "Each box's label gives " +
+                              "the scan's date and age; tap a box to show or hide its splat, and hold the eye " +
+                              "button or lower the slider to see the space as it is now."
                     )
                     guideRow(
                         icon: "6.circle.fill",

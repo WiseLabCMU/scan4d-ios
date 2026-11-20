@@ -4,8 +4,9 @@ import SwiftUI
 // What the sync and warning badges on locations and scan cards mean. Like UserGuideView, this
 // is documentation that lives in SwiftUI: when a badge's look or rule changes, change its row
 // here in the same change set. The rules live in LocationGridTile, ScanCard and CaptureIntegrity
-// (ScansListView.swift), CompactLocationTile (StitchGraphView.swift), SyncBadge and SyncLine
-// (SyncViews.swift), BundleSync.spaceState and line(for:) (ScanBundle.swift), UploadStatus
+// (ScansListView.swift), CompactLocationTile (StitchGraphView.swift), SyncBadge, SyncLine and
+// LayerLine (SyncViews.swift; the splat line's look is read from LayerLine.look), ScanLayers.line
+// (ScanLayers.swift), BundleSync.spaceState and line(for:) (ScanBundle.swift), UploadStatus
 // (ScanStore.swift), InterruptedExports.message, and ControlPlaneSync.SpaceState
 // (ControlPlaneSpaceSyncButton.swift). Badge symbols and colors, status labels and sync symbols
 // are read from those types so the samples cannot drift; only the badge styling is copied.
@@ -66,6 +67,28 @@ struct StatusIconsGuideSections: View {
                               "reason sending again can't change, so it waits until the scan changes. " +
                               "Retry in the Server tab sends it again.")
 
+            layerLineRow(.available(bytes: 15_700_000, stale: false),
+                         text: "The Scan4D server made a splat of this scan: a detailed 3D reconstruction, trained " +
+                               "on the server from the scan's photos. Download brings a copy to this phone, from " +
+                               "the same server. Made from an older version of this scan means the scan changed " +
+                               "since; the server can make a new one.")
+            layerLineRow(.ready(stale: false),
+                         text: "This phone has the server's latest splat of the scan, in the scan's own folder. " +
+                               "It is never sent back, it is left out of iCloud backups, and it goes when the " +
+                               "scan is deleted. A long press on the line removes it from the phone; the server " +
+                               "keeps it.")
+            layerLineRow(.update(bytes: 15_700_000),
+                         text: "The server made a newer splat of the scan. Update replaces the copy on this phone.")
+            layerLineRow(.otherLevel(onPhone: "full", bytes: 3_100_000),
+                         text: "The splat on this phone is in the other quality than the Server tab's Splat " +
+                               "Quality: Light, a few MB that any phone draws smoothly, or Full, everything the " +
+                               "server trained. Download replaces it with the quality chosen; until then the " +
+                               "phone draws the one it has.")
+            layerLineRow(.failed("Can't reach the server"),
+                         text: "The download didn't finish, and the reason follows. Retry picks it up where it " +
+                               "stopped. A splat that changed on the server while it downloaded is refused: " +
+                               "sync, then download it again.")
+
             statusRow(.zipping, fraction: 0.4,
                       text: "Share is building the export. While it runs, the label names the step " +
                             "(Privacy blur, Zipping and so on) and the bar shows its progress. Keep the " +
@@ -98,8 +121,9 @@ struct StatusIconsGuideSections: View {
             Text("TROUBLESHOOTING: SYNC AND SHARE")
         } footer: {
             Text("The cloud badge sits in the top-right corner of each location, in the list and in " +
-                 "the graph view. Each scan card shows its sync line under its details, and Share's " +
-                 "status at its top right while an export runs or after it ends.")
+                 "the graph view. Each scan card shows its sync line under its details, then its splat " +
+                 "line when the server made one, and Share's status at its top right while an export " +
+                 "runs or after it ends.")
                 .font(.caption2)
                 .foregroundColor(.gray)
         }
@@ -186,6 +210,27 @@ private extension StatusIconsGuideSections {
             }
             .font(.caption2)
             .foregroundColor(failed ? .yellow : .green.opacity(0.8))
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.gray)
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// A scan card's splat line as `LayerLine` draws it (its own look), with the explanation under it.
+    @ViewBuilder
+    func layerLineRow(_ line: ScanLayers.Line, text: String) -> some View {
+        let look = LayerLine.look(line)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: "cube.transparent")
+                Text(look.text).lineLimit(2)
+                if let action = look.action {
+                    Text(action).bold().foregroundColor(.cyan)
+                }
+            }
+            .font(.caption2)
+            .foregroundColor(look.color)
             Text(text)
                 .font(.caption)
                 .foregroundColor(.gray)

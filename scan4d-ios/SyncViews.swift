@@ -77,6 +77,99 @@ struct SyncLine: View {
     }
 }
 
+/// A scan card's splat line (REQ-041): the splat the Scan4D server made from the scan, whether this
+/// phone has it, and Download (or Update, or Retry). Nothing when there is none. A long press on a
+/// downloaded one removes it from the phone. The card reads the copy on disk (`ScanLayers.readLocal`).
+struct LayerLine: View {
+    let scan: CapturedScan
+    var kind = ScanLayer.splat
+    @AppStorage(AppConstants.Key.splatQuality) private var quality = AppConstants.splatQuality
+
+    var body: some View {
+        let layers = ScanLayers.shared
+        let id: UUID = scan.id
+        if let line = layers.line(for: id, kind: kind, quality: quality) {
+            let look = Self.look(line)
+            HStack(spacing: 4) {
+                Image(systemName: "cube.transparent")
+                Text(look.text).lineLimit(2)
+                if let action = look.action, ControlPlaneSync.shared.client != nil {
+                    Button(action) {
+                        layers.download(scanId: id, scanDirectory: scan.scanDirectory, kind: kind, quality: quality)
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption2.bold())
+                    .foregroundColor(.cyan)
+                }
+            }
+            .font(.caption2)
+            .foregroundColor(look.color)
+            .contextMenu {
+                if layers.local[ScanLayers.key(id, kind)] != nil {
+                    Button(role: .destructive) {
+                        layers.remove(scanId: id, scanDirectory: scan.scanDirectory, kind: kind)
+                    } label: {
+                        Label("Remove Splat from This Phone", systemImage: "trash")
+                    }
+                }
+            }
+        }
+    }
+
+    static func look(_ line: ScanLayers.Line) -> (text: String, action: String?, color: Color) {
+        let older = " (made from an older version of this scan)"
+        switch line {
+        case .available(let bytes, let stale):
+            return ("Splat on the server · \(size(bytes))" + (stale ? older : ""), "Download", .white.opacity(0.7))
+        case .downloading(let fraction):
+            return ("Downloading splat… \(Int(fraction * 100))%", nil, .cyan)
+        case .ready(let stale):
+            return ("Splat on this phone" + (stale ? older : ""), nil, .green.opacity(0.8))
+        case .update(let bytes):
+            return ("Newer splat on the server · \(size(bytes))", "Update", .white.opacity(0.7))
+        case .otherLevel(let onPhone, let bytes):
+            let held = SplatQuality(rawValue: onPhone)?.title ?? onPhone
+            return ("\(held) splat on this phone · the other quality on the server · \(size(bytes))", "Download",
+                    .white.opacity(0.7))
+        case .localOnly:
+            return ("Splat on this phone (no longer on the server)", nil, .white.opacity(0.7))
+        case .failed(let message):
+            return ("Splat didn't download: \(message)", "Retry", .yellow)
+        }
+    }
+
+    private static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+/// The Server tab's splat quality (REQ-041): which level of a splat the cards' Download fetches.
+/// Light by default, small enough for every phone; Full for a device that draws more. A splat on the
+/// phone at the other level stays until its card's Download replaces it.
+struct SplatQualitySection: View {
+    @AppStorage(AppConstants.Key.splatQuality) private var quality = AppConstants.splatQuality
+
+    var body: some View {
+        Section {
+            Picker("Splat quality", selection: $quality) {
+                ForEach(SplatQuality.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.vertical, 4)
+        } header: {
+            Text("SPLATS")
+        } footer: {
+            Text("The server makes each splat in two qualities. Light: about 250,000 points and a few MB, " +
+                 "which any phone draws smoothly. Full: everything the server trained, up to millions of " +
+                 "points and tens of MB: sharper up close, slower to download and to draw. Changing it " +
+                 "doesn't remove splats already on this phone: their cards offer the other quality to download.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+        }
+        .listRowBackground(Color.white.opacity(0.05))
+    }
+}
+
 extension View {
     /// Asks before a scan captured with the Privacy Filter off is selected for sync: its bundle
     /// carries its photos as captured, people unblurred.
@@ -236,6 +329,15 @@ private struct PendingBundleRow: View {
     SyncLine(scan: CapturedScan(name: "Sample Scan", vertexCount: 1500, faceCount: 2000))
         .padding()
         .background(Color.black)
+}
+
+#Preview("Splat quality") {
+    NavigationStack {
+        List { SplatQualitySection() }
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
+    }
+    .preferredColorScheme(.dark)
 }
 
 #Preview("Pending bundles") {
