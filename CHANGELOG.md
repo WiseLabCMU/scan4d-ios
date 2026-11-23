@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/WiseLabCMU/scan4d-ios/compare/v0.10.0...v0.11.0) (2026-11-20)
+
+
+### Features
+
+* **ar:** draw the room scan's ghost under the focus splats ([dd90878](https://github.com/WiseLabCMU/scan4d-ios/commit/dd9087814ace6e33ab127d5a2dc4f48869b01bd5))
+* **ar:** show a space's focus splats over the camera ([90d9ba3](https://github.com/WiseLabCMU/scan4d-ios/commit/90d9ba3d8713c52b0fa1763ae199ef2d5263f567))
+* download and render focuse area splats on map and in AR ([b8d386c](https://github.com/WiseLabCMU/scan4d-ios/commit/b8d386c3e149f4b789552515f0261fd4057b16a6))
+* **focus:** show focus scans on every room scan; load AR splats after localizing ([542cd3f](https://github.com/WiseLabCMU/scan4d-ios/commit/542cd3fb1ff295c380b075105a434909396d1c69))
+* **focus:** splat repeats, a soft photo limit, and region rescans ([533eb82](https://github.com/WiseLabCMU/scan4d-ios/commit/533eb8239091c9417b79610928b43b4e36d1bac8))
+* **focus:** splat repeats, a soft photo limit, and region rescans ([5f4d66c](https://github.com/WiseLabCMU/scan4d-ios/commit/5f4d66c0d5c37246ab5994c1c747146082f26762))
+* **preview:** draw focus splats in place of the mesh in the room preview ([e452a3b](https://github.com/WiseLabCMU/scan4d-ios/commit/e452a3b8ba45bd7a23a747c7a11b4f7fa46a853a))
+* **splats:** draw every splat on the phone, with no count limit ([65fa68b](https://github.com/WiseLabCMU/scan4d-ios/commit/65fa68b42111a97c7d4e71f0ae21e1e25049a579))
+* **splats:** Light or Full splat quality ([24e32b0](https://github.com/WiseLabCMU/scan4d-ios/commit/24e32b0aa406d2a7533042e6753c813919db7299))
+* **sync:** choose which spaces sync, and keep test scans on the device ([88cc815](https://github.com/WiseLabCMU/scan4d-ios/commit/88cc815eead4e6a5e50e894a0d095571e57adc9b))
+* **sync:** choose which spaces sync, and keep test scans on the device ([d63296b](https://github.com/WiseLabCMU/scan4d-ios/commit/d63296b5c04cb97575211407fe7d90c9a540c5cf))
+* **sync:** download the splats the server made of a scan ([5813b37](https://github.com/WiseLabCMU/scan4d-ios/commit/5813b37f03b6fd6791306aff0f0ba3c825bcf729))
+* **viewer:** open a focus scan's splat in 3D ([64cfa0d](https://github.com/WiseLabCMU/scan4d-ios/commit/64cfa0d06454e7775319fbf95d8e7bd3279fb283))
+
 ## [0.10.0](https://github.com/WiseLabCMU/scan4d-ios/compare/v0.9.0...v0.10.0) (2026-11-12)
 
 
