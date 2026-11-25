@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/WiseLabCMU/scan4d-ios/compare/v0.11.0...v0.12.0) (2026-11-25)
+
+
+### Features
+
+* try https then http for a server host typed without a scheme ([8bbf6ce](https://github.com/WiseLabCMU/scan4d-ios/commit/8bbf6ce87454b3fc33cb3d09121805f5bb4492cf))
+
 ## [0.11.0](https://github.com/WiseLabCMU/scan4d-ios/compare/v0.10.0...v0.11.0) (2026-11-20)
 
 
