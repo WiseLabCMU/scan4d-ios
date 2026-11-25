@@ -9,10 +9,31 @@ import XCTest
 @MainActor
 final class ControlPlaneTests: XCTestCase {
 
-    func testHostWithoutSchemeIsHTTP() throws {
+    func testHostWithoutSchemeIsHTTPSUntilProbed() throws {
+        ControlPlaneScheme.forget()
         let url = try XCTUnwrap(ControlPlaneClient.baseURL(fromHost: " 192.168.1.40:8000 "))
-        XCTAssertEqual(url.absoluteString, "http://192.168.1.40:8000")
-        XCTAssertEqual(url.appending(path: "v1/health").absoluteString, "http://192.168.1.40:8000/v1/health")
+        XCTAssertEqual(url.absoluteString, "https://192.168.1.40:8000")
+        XCTAssertEqual(url.appending(path: "v1/health").absoluteString, "https://192.168.1.40:8000/v1/health")
+    }
+
+    func testResolvedSchemeAppliesOnlyToItsTypedHost() throws {
+        defer { ControlPlaneScheme.forget() }
+        ControlPlaneScheme.record("http", for: "192.168.1.40:8000")
+        XCTAssertEqual(ControlPlaneClient.baseURL(fromHost: "192.168.1.40:8000 ")?.scheme, "http")
+        XCTAssertEqual(ControlPlaneClient.baseURL(fromHost: "192.168.1.41:8000")?.scheme, "https")
+        XCTAssertEqual(ControlPlaneClient.baseURL(fromHost: "https://192.168.1.40:8000")?.scheme, "https")
+        ControlPlaneScheme.forget()
+        XCTAssertEqual(ControlPlaneClient.baseURL(fromHost: "192.168.1.40:8000")?.scheme, "https")
+    }
+
+    func testOnlyConnectionFailuresFallBackToHTTP() {
+        for code in [URLError.Code.cannotConnectToHost, .timedOut, .secureConnectionFailed, .networkConnectionLost] {
+            XCTAssertTrue(ControlPlaneScheme.shouldFallBack(on: URLError(code)), "\(code)")
+        }
+        for code in [URLError.Code.serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .cannotFindHost,
+                     .notConnectedToInternet, .appTransportSecurityRequiresSecureConnection] {
+            XCTAssertFalse(ControlPlaneScheme.shouldFallBack(on: URLError(code)), "\(code)")
+        }
     }
 
     func testHostKeepsSchemeAndPathPrefix() throws {

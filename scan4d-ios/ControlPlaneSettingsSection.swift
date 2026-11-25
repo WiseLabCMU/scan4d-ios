@@ -12,8 +12,13 @@ struct ControlPlaneSettingsSection: View {
     @AppStorage(AppConstants.Key.controlPlaneHost) private var host = AppConstants.controlPlaneHost
     @AppStorage(AppConstants.Key.controlPlaneDeviceLabel) private var deviceLabel = ""
     @AppStorage(AppConstants.Key.controlPlaneAllowUntrusted) private var allowUntrusted = false
+    @AppStorage(AppConstants.Key.controlPlaneResolvedScheme) private var resolvedScheme = ""
+    @AppStorage(AppConstants.Key.controlPlaneResolvedFor) private var resolvedFor = ""
+    @AppStorage(AppConstants.Key.controlPlaneHttpAcknowledged) private var httpAcknowledged = ""
     @State private var password = ControlPlaneSecret.password
+    @State private var askingAboutHttp = false
     @FocusState private var passwordFocused: Bool
+    @FocusState private var hostFocused: Bool
 
     private var sync: ControlPlaneSync { ControlPlaneSync.shared }
 
@@ -31,9 +36,22 @@ struct ControlPlaneSettingsSection: View {
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
                     .keyboardType(.URL)
-                Text("The Scan4D server, as host:port or a URL. No scheme means http. Leave empty to turn sync off.")
+                    .focused($hostFocused)
+                    .onSubmit { checkHttpExposure() }
+                Text("The Scan4D server, as host:port or a URL. Without a scheme, https is tried first and http only if https can't connect (never with a password). Leave empty to turn sync off.")
                     .font(.caption)
                     .foregroundColor(.gray)
+                if let found = foundScheme {
+                    Label("Connecting over \(found)", systemImage: found == "https" ? "lock.fill" : "lock.open.fill")
+                        .font(.caption)
+                        .foregroundColor(found == "https" ? .gray : .orange)
+                }
+                if exposesPassword {
+                    Label("This sends the server password over plain http, readable by anyone on the network. Use https.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
                 SecureField("Server password", text: $password)
                     .foregroundColor(.white)
                     .autocapitalization(.none)
@@ -93,6 +111,37 @@ struct ControlPlaneSettingsSection: View {
         .onChange(of: password) { _, _ in
             savePassword()
         }
+        .onChange(of: hostFocused) { _, focused in
+            if !focused { checkHttpExposure() }
+        }
+        .onChange(of: passwordFocused) { _, focused in
+            if !focused { checkHttpExposure() }
+        }
+        .confirmationDialog("Send the password over http?", isPresented: $askingAboutHttp, titleVisibility: .visible) {
+            Button("Use https") { host = typedHost.replacingOccurrences(of: "http://", with: "https://", options: [.caseInsensitive, .anchored]) }
+            Button("Keep http", role: .destructive) { httpAcknowledged = typedHost }
+        } message: {
+            Text("The server password would travel unencrypted to \(typedHost). Anyone on the network could read it.")
+        }
+    }
+
+    private var typedHost: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// The scheme the probe settled on for a host typed without one.
+    private var foundScheme: String? {
+        guard !typedHost.isEmpty, !ControlPlaneScheme.hasExplicitScheme(typedHost),
+              resolvedFor == typedHost, !resolvedScheme.isEmpty else { return nil }
+        return resolvedScheme
+    }
+
+    /// A typed http:// with a password set: the password goes in the clear.
+    private var exposesPassword: Bool {
+        !password.isEmpty && typedHost.lowercased().hasPrefix("http://")
+    }
+
+    /// Asks once per typed host, when editing settles (not on every keystroke).
+    private func checkHttpExposure() {
+        if exposesPassword && httpAcknowledged != typedHost { askingAboutHttp = true }
     }
 
     /// Into the Keychain as typed (an empty field removes it), then a sync to try it.

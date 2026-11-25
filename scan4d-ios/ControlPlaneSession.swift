@@ -92,6 +92,8 @@ nonisolated enum ControlPlaneSecret {
 
     /// Stores it, or removes it when empty.
     static func setPassword(_ value: String) {
+        // A host resolved to http while there was none must be probed again: a password never goes over it.
+        if !value.isEmpty { ControlPlaneScheme.forget() }
         SecItemDelete(query as CFDictionary)
         guard !value.isEmpty else { return }
         var item = query
