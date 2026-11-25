@@ -29,6 +29,9 @@ enum AppConstants {
     // MARK: - AppStorage Keys
     enum Key {
         static let controlPlaneHost = "controlPlaneHost"              // the Scan4D server, the control plane (host[:port] or URL); empty = sync off
+        nonisolated static let controlPlaneResolvedScheme = "controlPlaneResolvedScheme" // "http" or "https": what the probe found for a server typed without a scheme (ControlPlaneScheme)
+        nonisolated static let controlPlaneResolvedFor = "controlPlaneResolvedFor"   // the typed host that scheme belongs to
+        static let controlPlaneHttpAcknowledged = "controlPlaneHttpAcknowledged"     // the typed http:// host the user confirmed sending the password to
         static let controlPlaneDeviceLabel = "controlPlaneDeviceLabel" // this phone's name in the fleet (iOS gives apps only "iPhone")
         static let controlPlanePromptedTasks = "controlPlanePromptedTasks" // urgent tasks already alerted (each alerts once; then the to-do list)
         static let controlPlaneOpenTasks = "controlPlaneOpenTasks"    // the to-do list as of the last sync (JSON), shown while the server can't be reached
@@ -787,6 +790,7 @@ enum AppConstants {
     // MARK: - Control plane (scan4d-server)
     static let controlPlaneSyncDebounceS: Double = 5             // saves within this window share one sync
     static let controlPlaneRequestTimeoutS: TimeInterval = 15
+    nonisolated static let controlPlaneProbeTimeoutS: TimeInterval = 8   // one https or http probe of a server typed without a scheme
     static let controlPlaneUploadTimeoutS: TimeInterval = 60     // idle time allowed mid map-package upload (the RoomPlan preview, or an older app's files)
     static let controlPlaneBundlesWifiOnly = true                // data bundles wait for Wi-Fi unless the user lets them use cellular
     static let controlPlaneHoldBackFilterOff = true              // scans captured with the Privacy Filter off wait until selected, after a confirmation

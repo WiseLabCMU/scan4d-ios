@@ -130,11 +130,16 @@ nonisolated struct ControlPlaneClient: Sendable {
     }
 
     /// The server from what the user typed: "192.168.1.40:8000", "scan4d.local:8000",
-    /// "https://example.com/scan4d". No scheme means http; nil when unusable.
+    /// "https://example.com/scan4d". No scheme means https, or the http the probe found
+    /// (`ControlPlaneScheme`); nil when unusable.
     static func baseURL(fromHost host: String) -> URL? {
         let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let text = trimmed.contains("://") ? trimmed : "http://" + trimmed
+        let scheme = ControlPlaneScheme.resolved(for: trimmed) ?? "https"
+        return parse(trimmed.contains("://") ? trimmed : scheme + "://" + trimmed)
+    }
+
+    static func parse(_ text: String) -> URL? {
         guard let url = URL(string: text),
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let name = url.host(), !name.isEmpty else { return nil }

@@ -64,6 +64,7 @@ final class ControlPlaneSync {
     @ObservationIgnored private var rerun = false
     @ObservationIgnored private var deferredForCapture = false
     @ObservationIgnored private var poller: Task<Void, Never>?
+    @ObservationIgnored private var probedHost: String?
 
     private init() {}
 
@@ -129,7 +130,17 @@ final class ControlPlaneSync {
         }
     }
 
+    /// A host typed without a scheme is probed (https, then http) when no result is kept for it,
+    /// and once per launch to notice a server that has since gained https.
+    private func resolveScheme() async {
+        let typed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty, !ControlPlaneScheme.hasExplicitScheme(typed) else { return }
+        guard probedHost != typed || ControlPlaneScheme.resolved(for: typed) == nil else { return }
+        if await ControlPlaneScheme.resolve(host: typed) != nil { probedHost = typed }
+    }
+
     func syncNow() async {
+        if !captureActive { await resolveScheme() }
         guard let client else {
             status = .off
             if !openTasks.isEmpty { setOpenTasks([]) }   // the host was cleared: its list goes with it
@@ -505,6 +516,7 @@ final class ControlPlaneSync {
 
     /// Settings' Test connection: the server's health, as a line to show.
     func testConnection() async -> String {
+        await resolveScheme()
         guard let client else { return "Enter the server's host first." }
         do {
             let health = try await client.health()
